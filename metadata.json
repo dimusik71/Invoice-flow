@@ -1,0 +1,5 @@
+{
+  "name": "InvoiceFlow: Support at Home Automation",
+  "description": "A comprehensive dashboard for managing, reviewing, and automating invoice processing for Support at Home services. Features AI-powered extraction validation, Lookutway PO matching, and Xero integration monitoring.",
+  "requestFramePermissions": []
+}
