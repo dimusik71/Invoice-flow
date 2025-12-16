@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
-import { Terminal, Database, Play, AlertTriangle, X, RefreshCw, Zap, Bug } from 'lucide-react';
+import { Terminal, Database, Play, AlertTriangle, X, RefreshCw, Zap, Bug, Trash2 } from 'lucide-react';
 import { Invoice } from '../types';
+import { checkDatabaseConnection } from '../services/dbService';
 
 interface DevToolsPanelProps {
   onSeedData: () => void;
@@ -23,6 +24,16 @@ const DevToolsPanel: React.FC<DevToolsPanelProps> = ({ onSeedData, onClearData, 
       addLog(`Executing: ${name}`);
       action();
       addLog(`Completed: ${name}`);
+  };
+
+  const handleTestConnection = async () => {
+      addLog(`Testing Supabase Connection...`);
+      const result = await checkDatabaseConnection();
+      if (result.success) {
+          addLog(`SUCCESS: ${result.message}`);
+      } else {
+          addLog(`FAILURE: ${result.message}`);
+      }
   };
 
   if (!isOpen) return null;
@@ -56,6 +67,12 @@ const DevToolsPanel: React.FC<DevToolsPanelProps> = ({ onSeedData, onClearData, 
                         <Trash2 size={14} /> Purge DB
                     </button>
                 </div>
+                <button 
+                    onClick={handleTestConnection}
+                    className="w-full mt-2 flex items-center justify-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-2 rounded-md transition-colors text-xs"
+                >
+                    <RefreshCw size={14} /> Test DB Connection
+                </button>
             </div>
 
             {/* Simulation */}
@@ -109,8 +126,5 @@ const DevToolsPanel: React.FC<DevToolsPanelProps> = ({ onSeedData, onClearData, 
     </div>
   );
 };
-
-// Icon imports
-import { Trash2 } from 'lucide-react';
 
 export default DevToolsPanel;

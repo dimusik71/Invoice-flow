@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { AppSettings, ComplianceTemplate, ComplianceField, Invoice, Client, ComplianceAuditResult } from '../types';
-import { FileText, Plus, Upload, Loader2, Save, ArrowRight, Download, Send, AlertCircle, CheckCircle, Database, ShieldCheck, XCircle, Wand2, RefreshCw, Bot } from 'lucide-react';
+import { FileText, Plus, Upload, Loader2, Save, ArrowRight, Download, Send, AlertCircle, CheckCircle, Database, ShieldCheck, XCircle, Wand2, RefreshCw, Bot, Globe, Library, Copy } from 'lucide-react';
 import { parseComplianceTemplate, auditComplianceForm } from '../services/geminiService';
 import { MOCK_CLIENTS } from '../constants';
 
@@ -11,18 +11,74 @@ interface ComplianceReportsProps {
   onUpdateSettings: (settings: AppSettings) => void;
 }
 
+// --- OFFICIAL GOVERNMENT TEMPLATES (PRE-DIGITISED) ---
+const OFFICIAL_GOV_TEMPLATES: ComplianceTemplate[] = [
+    {
+        id: 'tpl-gov-sah-2024',
+        name: 'Support at Home - Monthly Payment Claim (v2024.1)',
+        description: 'Official Services Australia schema for Support at Home consolidated payments.',
+        authority: 'SERVICES_AUSTRALIA',
+        createdAt: new Date().toISOString(),
+        fields: [
+            { id: 'providerId', label: 'Provider NAPS ID', type: 'text', required: true, mappedKey: 'invoice.supplierABN' },
+            { id: 'participantId', label: 'Participant ID (Gov)', type: 'text', required: true, mappedKey: 'client.integrationId' },
+            { id: 'claimPeriodStart', label: 'Claim Period Start', type: 'date', required: true, mappedKey: 'invoice.date' }, // Simplified mapping
+            { id: 'serviceCode', label: 'Support Classification Code', type: 'text', required: true },
+            { id: 'claimAmount', label: 'Total Claim Amount (GST Exclusive)', type: 'currency', required: true, mappedKey: 'invoice.totalAmount' },
+            { id: 'invoiceReference', label: 'Invoice Reference', type: 'text', required: true, mappedKey: 'invoice.invoiceNumber' },
+            { id: 'declaration', label: 'I certify services were delivered per Quality Standards', type: 'checkbox', required: true, value: false }
+        ]
+    },
+    {
+        id: 'tpl-gov-ndis-bulk',
+        name: 'NDIS Payment Request (Bulk Upload)',
+        description: 'Standard NDIS bulk payment file structure (CSV compatible).',
+        authority: 'NDIS',
+        createdAt: new Date().toISOString(),
+        fields: [
+            { id: 'RegistrationNumber', label: 'Registration Number', type: 'text', required: true, mappedKey: 'invoice.supplierABN' },
+            { id: 'NDISNumber', label: 'Participant NDIS Number', type: 'text', required: true, mappedKey: 'client.ndisNumber' },
+            { id: 'SupportDeliveredFrom', label: 'Support Delivered From', type: 'date', required: true, mappedKey: 'invoice.date' },
+            { id: 'SupportDeliveredTo', label: 'Support Delivered To', type: 'date', required: true, mappedKey: 'invoice.date' },
+            { id: 'SupportNumber', label: 'Support Item Number', type: 'text', required: true },
+            { id: 'ClaimReference', label: 'Claim Reference', type: 'text', required: true, mappedKey: 'invoice.invoiceNumber' },
+            { id: 'Quantity', label: 'Quantity', type: 'number', required: true },
+            { id: 'UnitPrice', label: 'Unit Price', type: 'currency', required: true },
+            { id: 'GSTCode', label: 'GST Code', type: 'text', required: true, value: 'P1' }
+        ]
+    },
+    {
+        id: 'tpl-gov-chsp-perf',
+        name: 'CHSP Performance Report (Dex)',
+        description: 'Data Exchange (DEX) reporting for Commonwealth Home Support Program.',
+        authority: 'OTHER', // DSS
+        createdAt: new Date().toISOString(),
+        fields: [
+            { id: 'outletId', label: 'Outlet ID', type: 'text', required: true },
+            { id: 'clientId', label: 'Client ID', type: 'text', required: true, mappedKey: 'client.integrationId' },
+            { id: 'sessionDate', label: 'Session Date', type: 'date', required: true, mappedKey: 'invoice.date' },
+            { id: 'serviceTypeId', label: 'Service Type ID', type: 'text', required: true },
+            { id: 'totalCost', label: 'Total Cost', type: 'currency', required: true, mappedKey: 'invoice.totalAmount' },
+            { id: 'clientContribution', label: 'Client Contribution', type: 'currency', required: false }
+        ]
+    }
+];
+
 // Helper to safely get nested values
 const getNestedValue = (obj: any, path: string) => {
     return path.split('.').reduce((acc, part) => acc && acc[part], obj);
 };
 
 const ComplianceReports: React.FC<ComplianceReportsProps> = ({ settings, invoices, onUpdateSettings }) => {
-  const [activeTab, setActiveTab] = useState<'submission' | 'templates'>('submission');
+  const [activeTab, setActiveTab] = useState<'submission' | 'templates' | 'library'>('submission');
   
   // Template Manager State
   const [isUploading, setIsUploading] = useState(false);
   const [analyzedTemplate, setAnalyzedTemplate] = useState<ComplianceTemplate | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Library State
+  const [isFetchingLibrary, setIsFetchingLibrary] = useState(false);
 
   // Live Form State
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
@@ -80,6 +136,24 @@ const ComplianceReports: React.FC<ComplianceReportsProps> = ({ settings, invoice
       alert("Template saved successfully!");
   };
 
+  const handleImportOfficial = (template: ComplianceTemplate) => {
+      // Check if already exists
+      if (settings.complianceTemplates?.some(t => t.name === template.name)) {
+          alert("This template is already in your library.");
+          return;
+      }
+      const newTemplates = [...(settings.complianceTemplates || []), { ...template, id: `tpl-imp-${Date.now()}` }];
+      onUpdateSettings({ ...settings, complianceTemplates: newTemplates });
+      setActiveTab('templates');
+  };
+
+  const handleRefreshLibrary = () => {
+      setIsFetchingLibrary(true);
+      setTimeout(() => {
+          setIsFetchingLibrary(false);
+      }, 1500);
+  };
+
   const handleInvoiceSelect = (invId: string) => {
       setSelectedInvoiceId(invId);
       setAuditResult(null); // Reset audit on change
@@ -105,10 +179,11 @@ const ComplianceReports: React.FC<ComplianceReportsProps> = ({ settings, invoice
                   if (field.mappedKey === 'invoice.totalAmount') val = invoice.totalAmount;
                   if (field.mappedKey === 'invoice.date') val = invoice.invoiceDate;
                   if (field.mappedKey === 'invoice.number') val = invoice.invoiceNumber;
+                  if (field.mappedKey === 'invoice.supplierABN') val = invoice.supplierABN;
               } else if (field.mappedKey.startsWith('client.')) {
                   val = getNestedValue(client, field.mappedKey.replace('client.', ''));
                   // Specific case overrides for mock data gaps
-                  if (field.mappedKey === 'client.ndisNumber') val = client.integrationId; // Using IntegrationID as proxy
+                  if (field.mappedKey === 'client.ndisNumber' || field.mappedKey === 'client.integrationId') val = client.integrationId; // Using IntegrationID as proxy
               }
               
               if (val !== undefined && val !== null) {
@@ -186,15 +261,21 @@ const ComplianceReports: React.FC<ComplianceReportsProps> = ({ settings, invoice
             <div className="flex bg-slate-100 rounded-lg p-1">
                 <button 
                     onClick={() => setActiveTab('submission')}
-                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'submission' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-600 hover:text-slate-900'}`}
+                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'submission' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-600 hover:text-slate-900'}`}
                 >
-                    New Submission
+                    <Send size={14} /> New Submission
                 </button>
                 <button 
                     onClick={() => setActiveTab('templates')}
-                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'templates' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-600 hover:text-slate-900'}`}
+                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'templates' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-600 hover:text-slate-900'}`}
                 >
-                    Template Manager
+                    <FileText size={14} /> My Templates
+                </button>
+                <button 
+                    onClick={() => setActiveTab('library')}
+                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'library' ? 'bg-white shadow-sm text-purple-600' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                    <Library size={14} /> Official Library
                 </button>
             </div>
         </div>
@@ -202,25 +283,101 @@ const ComplianceReports: React.FC<ComplianceReportsProps> = ({ settings, invoice
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto p-8">
             
+            {activeTab === 'library' && (
+                <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-right-4">
+                    <div className="flex justify-between items-end bg-gradient-to-r from-purple-900 to-indigo-800 p-8 rounded-2xl text-white shadow-lg mb-8">
+                        <div>
+                            <h2 className="text-2xl font-bold flex items-center gap-3">
+                                <Globe className="text-purple-300" /> Government Template Registry
+                            </h2>
+                            <p className="text-purple-200 mt-2 max-w-2xl">
+                                Access the latest digitized reporting schemas for Support at Home, NDIS, and CHSP. 
+                                These templates are pre-mapped to InvoiceFlow data fields for instant compliance.
+                            </p>
+                        </div>
+                        <button 
+                            onClick={handleRefreshLibrary}
+                            disabled={isFetchingLibrary}
+                            className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors"
+                        >
+                            {isFetchingLibrary ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                            {isFetchingLibrary ? 'Checking Registry...' : 'Check for Updates'}
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {OFFICIAL_GOV_TEMPLATES.map((template) => (
+                            <div key={template.id} className="bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col h-full group">
+                                <div className="p-6 flex-1">
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-xl font-bold ${
+                                            template.authority === 'NDIS' ? 'bg-purple-100 text-purple-700' : 
+                                            template.authority === 'SERVICES_AUSTRALIA' ? 'bg-emerald-100 text-emerald-700' : 
+                                            'bg-blue-100 text-blue-700'
+                                        }`}>
+                                            {template.authority === 'NDIS' ? 'N' : template.authority === 'SERVICES_AUSTRALIA' ? 'SA' : 'G'}
+                                        </div>
+                                        <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded uppercase tracking-wider">
+                                            v2024.1
+                                        </span>
+                                    </div>
+                                    <h3 className="font-bold text-slate-800 mb-2">{template.name}</h3>
+                                    <p className="text-xs text-slate-500 mb-4">{template.description}</p>
+                                    
+                                    <div className="flex flex-wrap gap-2 mb-4">
+                                        {template.fields.slice(0, 3).map(f => (
+                                            <span key={f.id} className="text-[10px] bg-slate-50 border border-slate-200 px-2 py-1 rounded text-slate-600">
+                                                {f.label}
+                                            </span>
+                                        ))}
+                                        {template.fields.length > 3 && (
+                                            <span className="text-[10px] bg-slate-50 border border-slate-200 px-2 py-1 rounded text-slate-600">
+                                                +{template.fields.length - 3} more
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-xl">
+                                    <button 
+                                        onClick={() => handleImportOfficial(template)}
+                                        className="w-full bg-white border border-slate-300 hover:border-indigo-500 hover:text-indigo-600 text-slate-700 font-bold py-2 rounded-lg text-sm transition-colors flex items-center justify-center gap-2 shadow-sm"
+                                    >
+                                        <Copy size={16} /> Import Template
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {activeTab === 'templates' && (
-                <div className="max-w-4xl mx-auto space-y-8">
+                <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2">
                     
                     {/* Upload Section */}
                     <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm text-center">
                         <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4">
                             <Upload className="text-indigo-600" size={32} />
                         </div>
-                        <h3 className="text-lg font-bold text-slate-800">Digitize Government Form</h3>
+                        <h3 className="text-lg font-bold text-slate-800">Digitize Custom Form</h3>
                         <p className="text-slate-500 mb-6 max-w-md mx-auto">Upload a blank PDF or Image of a government form. Our AI will analyze the structure and create a mapped digital template.</p>
                         
-                        <button 
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={isUploading}
-                            className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 flex items-center gap-2 mx-auto disabled:opacity-70"
-                        >
-                            {isUploading ? <Loader2 className="animate-spin" /> : <Plus size={18} />}
-                            {isUploading ? 'Analyzing Template...' : 'Upload New Template'}
-                        </button>
+                        <div className="flex justify-center gap-4">
+                            <button 
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isUploading}
+                                className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 flex items-center gap-2 disabled:opacity-70"
+                            >
+                                {isUploading ? <Loader2 className="animate-spin" /> : <Plus size={18} />}
+                                {isUploading ? 'Analyzing Template...' : 'Upload & Analyze'}
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('library')}
+                                className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-lg font-bold hover:bg-indigo-50 transition-all flex items-center gap-2"
+                            >
+                                <Library size={18} /> Browse Official Library
+                            </button>
+                        </div>
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.pdf" onChange={handleTemplateUpload} />
                     </div>
 
@@ -292,32 +449,40 @@ const ComplianceReports: React.FC<ComplianceReportsProps> = ({ settings, invoice
                     )}
 
                     {/* Existing Templates List */}
-                    {settings.complianceTemplates && settings.complianceTemplates.length > 0 && (
-                        <div className="space-y-4">
-                            <h3 className="text-lg font-bold text-slate-800">Active Templates</h3>
-                            <div className="grid gap-4">
-                                {settings.complianceTemplates.map(tpl => (
-                                    <div key={tpl.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-                                                <FileText size={20} />
-                                            </div>
-                                            <div>
-                                                <h4 className="font-bold text-slate-800">{tpl.name}</h4>
-                                                <p className="text-xs text-slate-500">{tpl.description} • {tpl.fields.length} Fields</p>
-                                            </div>
-                                        </div>
-                                        <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded uppercase">{tpl.authority}</span>
-                                    </div>
-                                ))}
-                            </div>
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                            <h3 className="text-lg font-bold text-slate-800">My Active Templates</h3>
+                            <span className="text-xs text-slate-500">{settings.complianceTemplates?.length || 0} Templates</span>
                         </div>
-                    )}
+                        
+                        {(!settings.complianceTemplates || settings.complianceTemplates.length === 0) && (
+                            <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-slate-400">
+                                <p>No templates yet. Import from Library or Upload one.</p>
+                            </div>
+                        )}
+
+                        <div className="grid gap-4">
+                            {settings.complianceTemplates?.map(tpl => (
+                                <div key={tpl.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                                            <FileText size={20} />
+                                        </div>
+                                        <div>
+                                            <h4 className="font-bold text-slate-800">{tpl.name}</h4>
+                                            <p className="text-xs text-slate-500">{tpl.description} • {tpl.fields.length} Fields</p>
+                                        </div>
+                                    </div>
+                                    <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded uppercase">{tpl.authority}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             )}
 
             {activeTab === 'submission' && (
-                <div className="max-w-7xl mx-auto h-full flex gap-6">
+                <div className="max-w-7xl mx-auto h-full flex gap-6 animate-in fade-in slide-in-from-bottom-2">
                     
                     {/* Left: Configuration & Audit Panel */}
                     <div className="w-96 bg-white border border-slate-200 rounded-xl flex flex-col h-[700px] shadow-sm">
@@ -337,6 +502,9 @@ const ComplianceReports: React.FC<ComplianceReportsProps> = ({ settings, invoice
                                             <option key={t.id} value={t.id}>{t.name}</option>
                                         ))}
                                     </select>
+                                    {(!settings.complianceTemplates || settings.complianceTemplates.length === 0) && (
+                                        <p className="text-[10px] text-amber-600 mt-1">No templates found. Go to 'Official Library' to add one.</p>
+                                    )}
                                 </div>
 
                                 <div>
@@ -472,15 +640,19 @@ const ComplianceReports: React.FC<ComplianceReportsProps> = ({ settings, invoice
                                                         </label>
                                                         <div className="relative">
                                                             <input 
-                                                                type={field.type === 'currency' ? 'number' : field.type}
-                                                                value={formData[field.id] || ''}
+                                                                type={field.type === 'currency' ? 'number' : field.type === 'checkbox' ? 'checkbox' : field.type}
+                                                                checked={field.type === 'checkbox' ? (formData[field.id] || false) : undefined}
+                                                                value={field.type !== 'checkbox' ? (formData[field.id] || '') : undefined}
                                                                 onChange={(e) => {
-                                                                    setFormData({...formData, [field.id]: e.target.value});
-                                                                    // Clear issue visually on edit (requires re-audit to fully clear)
+                                                                    const val = field.type === 'checkbox' ? e.target.checked : e.target.value;
+                                                                    setFormData({...formData, [field.id]: val});
                                                                 }}
-                                                                className={`w-full border-b bg-slate-50 p-1 text-sm focus:outline-none transition-colors text-black font-mono ${issue ? 'border-rose-500 bg-rose-50' : 'border-slate-400 focus:border-blue-600 focus:bg-blue-50'}`}
+                                                                className={`
+                                                                    ${field.type === 'checkbox' ? 'w-4 h-4' : 'w-full border-b bg-slate-50 p-1 text-sm focus:outline-none transition-colors text-black font-mono'}
+                                                                    ${issue && field.type !== 'checkbox' ? 'border-rose-500 bg-rose-50' : 'border-slate-400 focus:border-blue-600 focus:bg-blue-50'}
+                                                                `}
                                                             />
-                                                            {issue && (
+                                                            {issue && field.type !== 'checkbox' && (
                                                                 <div className="absolute right-0 top-1 text-rose-500">
                                                                     <AlertCircle size={14} />
                                                                 </div>

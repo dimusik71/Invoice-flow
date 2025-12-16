@@ -243,6 +243,15 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       }
   };
 
+  const handleDraftChange = (newBody: string) => {
+      if (!rejectionDrafts) return;
+      const key = activeDraftTab === 'vendor' ? 'vendorEmail' : 'clientEmail';
+      setRejectionDrafts({
+          ...rejectionDrafts,
+          [key]: { ...rejectionDrafts[key], body: newBody }
+      });
+  };
+
   const handleConfirmRejection = async () => {
       onUpdateInvoice({ 
           ...invoice, 
@@ -397,10 +406,20 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
   return (
     <div className="h-screen flex flex-col bg-slate-50 relative">
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm z-10">
-        <div className="flex items-center space-x-4">
-          <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full text-slate-500">
-            <ArrowLeft size={20} />
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={onBack} 
+            className="flex items-center gap-2 text-slate-500 hover:text-slate-800 transition-colors group"
+            title="Return to Invoice List"
+          >
+            <div className="p-2 hover:bg-slate-100 rounded-full transition-colors border border-transparent hover:border-slate-200">
+               <ArrowLeft size={20} className="group-hover:-translate-x-0.5 transition-transform" />
+            </div>
+            <span className="text-sm font-bold text-slate-600 group-hover:text-slate-900 hidden md:block">Back</span>
           </button>
+          
+          <div className="h-8 w-px bg-slate-200 hidden md:block"></div>
+
           <div>
             <div className="flex items-center space-x-3">
               <h2 className="text-lg font-bold text-slate-800">{invoice.intakeId}</h2>
@@ -454,7 +473,6 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
           </div>
       )}
 
-      {/* Existing UI Structure - Simplified for brevity in this update block */}
       <div className="flex-1 flex overflow-hidden">
         <div className="w-1/2 bg-slate-200 border-r border-slate-300 relative flex flex-col">
           <div className="absolute inset-0 flex items-center justify-center text-slate-400 flex-col">
@@ -643,6 +661,52 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
                                     )
                                 }
 
+                                {invoice.chiefAuditorReview && (
+                                    <div className="mt-6 pt-6 border-t border-slate-200 animate-in fade-in slide-in-from-bottom-2">
+                                        <div className="flex items-center gap-3 mb-3">
+                                            <div className="p-2 bg-purple-100 text-purple-700 rounded-lg">
+                                                <Gavel size={20} />
+                                            </div>
+                                            <div>
+                                                <h5 className="font-bold text-slate-800 text-sm">Chief Auditor Determination</h5>
+                                                <p className="text-xs text-slate-500">Official Review • Confidence {invoice.chiefAuditorReview.confidence}%</p>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className={`p-4 rounded-lg border-l-4 mb-4 ${
+                                            invoice.chiefAuditorReview.determination === 'OVERRIDE_APPROVE' ? 'bg-emerald-50 border-emerald-500 text-emerald-800' :
+                                            invoice.chiefAuditorReview.determination === 'UPHOLD_REJECTION' ? 'bg-rose-50 border-rose-500 text-rose-800' :
+                                            'bg-amber-50 border-amber-500 text-amber-800'
+                                        }`}>
+                                            <p className="font-bold text-sm mb-1">
+                                                {invoice.chiefAuditorReview.determination.replace('_', ' ')}
+                                            </p>
+                                            <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                                                {invoice.chiefAuditorReview.finalVerdict}
+                                            </p>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <div>
+                                                <span className="text-xs font-bold text-slate-500 uppercase block mb-1">Regulatory Citations</span>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {invoice.chiefAuditorReview.regulatoryCitations.map((cite, idx) => (
+                                                        <span key={idx} className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded border border-slate-200 font-mono">
+                                                            {cite}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <span className="text-xs font-bold text-slate-500 uppercase block mb-1">Audit Log Entry</span>
+                                                <p className="text-xs font-mono text-slate-500 bg-slate-100 p-2 rounded border border-slate-200">
+                                                    {invoice.chiefAuditorReview.auditLogEntry}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="mt-4 pt-4 border-t border-slate-200 flex items-center gap-2">
                                     <span className="text-xs font-bold text-slate-500">Recommendation:</span>
                                     <span className="text-sm font-medium text-slate-900 bg-white px-3 py-1 rounded border border-slate-200 shadow-sm">
@@ -753,7 +817,12 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
                           </div>
                           <div>
                               <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Body</label>
-                              <textarea className="w-full p-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white h-64 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" defaultValue={activeDraftTab === 'vendor' ? rejectionDrafts.vendorEmail.body : rejectionDrafts.clientEmail.body}></textarea>
+                              <textarea 
+                                  key={activeDraftTab}
+                                  className="w-full p-3 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white h-64 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" 
+                                  value={activeDraftTab === 'vendor' ? rejectionDrafts.vendorEmail.body : rejectionDrafts.clientEmail.body}
+                                  onChange={(e) => handleDraftChange(e.target.value)}
+                              ></textarea>
                           </div>
                       </div>
                   </div>

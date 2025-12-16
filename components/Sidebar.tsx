@@ -22,7 +22,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, onScanCl
 
   // Detect modes
   const isBeta = tenant?.status === 'BETA';
-  const isImpersonating = isSuperuser && currentView !== 'superuser' && currentView !== 'superuser_audit' && currentView !== 'superuser_settings';
+  // Check if we are "impersonating" or just "using the app" as a Superuser.
+  // We consider it "Impersonating/Using App" if the view is NOT one of the Superuser specific views.
+  const isAppView = currentView !== 'superuser' && currentView !== 'superuser_audit' && currentView !== 'superuser_settings';
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -36,15 +38,15 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, onScanCl
   ];
 
   // Dynamic Styles
-  // Priority: Beta -> Impersonation -> Superuser -> Normal
+  // Priority: Beta -> Impersonation/App Mode -> Superuser Default
   let primaryColor = tenant?.primaryColor || '#334155';
   let secondaryColor = tenant?.secondaryColor || '#0f172a';
 
   if (isBeta) {
       primaryColor = '#7c3aed'; // Violet
       secondaryColor = '#2e1065'; // Deep Violet
-  } else if (isImpersonating) {
-      // Keep tenant colors but they will be wrapped in warning logic
+  } else if (isAppView && isSuperuser) {
+      // Keep tenant colors if set, otherwise default app colors
   } else if (isSuperuser) {
       primaryColor = '#4f46e5';
       secondaryColor = '#312e81';
@@ -65,15 +67,15 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, onScanCl
         <div className="bg-fuchsia-500 text-white text-[10px] font-bold text-center py-1 uppercase tracking-wider flex items-center justify-center gap-1 animate-pulse">
             <TestTube size={12} /> BETA LAB ENVIRONMENT
         </div>
-      ) : isImpersonating && (
+      ) : isAppView && isSuperuser && (
         <div className="bg-amber-500 text-amber-950 text-[10px] font-bold text-center py-1 uppercase tracking-wider flex items-center justify-center gap-1">
-            <ShieldCheck size={12} /> Superuser Impersonation
+            <ShieldCheck size={12} /> Superuser Mode
         </div>
       )}
 
       <div className="p-6 border-b border-white/5 relative">
         <h1 className="text-xl font-bold text-white flex items-center gap-3">
-           {isSuperuser && !isImpersonating && !isBeta ? (
+           {isSuperuser && !isAppView && !isBeta ? (
                <div className="h-8 w-8 rounded-lg bg-indigo-500 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">SU</div>
            ) : tenant?.logoUrl ? (
              <img src={tenant.logoUrl} alt="Logo" className="h-8 w-8" />
@@ -83,16 +85,16 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, onScanCl
              </div>
            )}
            <span className="truncate tracking-tight">
-             {isImpersonating ? tenant?.name : (isSuperuser ? 'Super Admin' : (tenant?.name || 'InvoiceFlow'))}
+             {isAppView ? (tenant?.name || 'InvoiceFlow') : (isSuperuser ? 'Super Admin' : (tenant?.name || 'InvoiceFlow'))}
            </span>
         </h1>
         <p className="text-[10px] text-white/40 mt-1.5 uppercase tracking-widest font-semibold ml-1">
-            {isBeta ? 'Development Sandbox' : isSuperuser && !isImpersonating ? 'System Control' : 'Support at Home'}
+            {isBeta ? 'Development Sandbox' : isSuperuser && !isAppView ? 'System Control' : 'Support at Home'}
         </p>
       </div>
       
-      {/* Return Button */}
-      {isImpersonating && (
+      {/* Return Button for Superuser in App Mode */}
+      {isAppView && isSuperuser && (
           <div className="px-4 pt-4 pb-2">
               <button 
                 onClick={() => setCurrentView('superuser')}
@@ -103,13 +105,13 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, onScanCl
                 }`}
               >
                   <ArrowLeftCircle size={16} />
-                  {isBeta ? 'EXIT BETA LAB' : 'EXIT IMPERSONATION'}
+                  {isBeta ? 'EXIT BETA LAB' : 'RETURN TO ADMIN'}
               </button>
           </div>
       )}
       
-      {/* Standard Actions (Hidden if viewing Global Admin) */}
-      {!isSuperuser || isImpersonating ? (
+      {/* Standard Actions (Visible in App Mode) */}
+      {(isAppView) && (
           <div className="p-4 space-y-3">
             <button 
               onClick={onScanClick}
@@ -141,11 +143,11 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, onScanCl
                 </button>
             )}
           </div>
-      ) : null}
+      )}
 
       <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
         {/* Global Admin Navigation */}
-        {isSuperuser && !isImpersonating ? (
+        {isSuperuser && !isAppView ? (
             <div className="space-y-1">
                 <button
                 onClick={() => setCurrentView('superuser')}

@@ -1,8 +1,9 @@
 
 import React, { useRef, useState } from 'react';
-import { Client, ClientDocument } from '../types';
-import { ArrowLeft, Upload, FileText, Trash2, Calendar, DollarSign, Activity, FileCheck, AlertTriangle } from 'lucide-react';
+import { Client, ClientDocument, FundingSource } from '../types';
+import { ArrowLeft, Upload, FileText, Trash2, Calendar, DollarSign, Activity, FileCheck, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { extractClientProfileFromDocument } from '../services/geminiService';
 
 interface ClientDetailProps {
   client: Client;
@@ -13,6 +14,7 @@ interface ClientDetailProps {
 const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onUpdate }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSyncingProfile, setIsSyncingProfile] = useState(false);
 
   // Budget Data for Chart
   const budgetData = [
@@ -20,28 +22,90 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onUpdate })
     { name: 'Remaining', value: client.totalBudgetCap - client.totalBudgetUsed, color: '#e2e8f0' }
   ];
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setIsUploading(true);
       const file = e.target.files[0];
       
-      // Simulate upload process
-      setTimeout(() => {
-          const newDoc: ClientDocument = {
-              id: `doc-${Date.now()}`,
-              name: file.name,
-              type: file.name.toLowerCase().includes('plan') ? 'CARE_PLAN' : 'OTHER',
-              size: file.size,
-              uploadDate: new Date().toISOString().split('T')[0],
-              url: '#'
-          };
+      // 1. Create Document Record (Mock Upload)
+      // In a real app, we'd upload to Supabase Storage here.
+      const newDoc: ClientDocument = {
+          id: `doc-${Date.now()}`,
+          name: file.name,
+          type: file.name.toLowerCase().includes('plan') ? 'CARE_PLAN' : 'OTHER',
+          size: file.size,
+          uploadDate: new Date().toISOString().split('T')[0],
+          url: '#' // Mock URL
+      };
 
-          onUpdate({
-              ...client,
-              documents: [newDoc, ...client.documents]
-          });
-          setIsUploading(false);
-      }, 1500);
+      // 2. Offer to Sync Profile Data
+      const shouldSync = confirm(`Uploaded "${file.name}".\n\nDo you want the AI to scan this document and update the client's funding/profile details automatically?`);
+
+      let updatedClient = { ...client, documents: [newDoc, ...client.documents] };
+
+      if (shouldSync) {
+          setIsSyncingProfile(true);
+          try {
+              const base64 = await new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onload = (e) => resolve((e.target?.result as string).split(',')[1]);
+                  reader.readAsDataURL(file);
+              });
+
+              // Use the new Robust Extractor
+              const profile = await extractClientProfileFromDocument(base64, file.type);
+              
+              // Merge extracted data carefully
+              updatedClient = {
+                  ...updatedClient,
+                  name: profile.name || updatedClient.name,
+                  email: profile.email || updatedClient.email,
+                  phone: profile.phone || updatedClient.phone,
+                  integrationId: profile.integrationId || updatedClient.integrationId,
+                  totalBudgetCap: profile.totalBudgetCap || updatedClient.totalBudgetCap,
+                  budgetRenewalDate: profile.budgetRenewalDate || updatedClient.budgetRenewalDate,
+                  
+                  // Specific Funding Details
+                  mmmLevel: (profile.mmmLevel as any) || updatedClient.mmmLevel,
+                  dvaCardType: (profile.dvaCardType as any) || updatedClient.dvaCardType,
+                  isIndigenous: profile.isIndigenous !== undefined ? profile.isIndigenous : updatedClient.isIndigenous,
+                  isClaimsConference: profile.isClaimsConference !== undefined ? profile.isClaimsConference : updatedClient.isClaimsConference,
+                  
+                  // Merge Schemes (Append new ones)
+                  activeSchemes: profile.detectedSchemes 
+                      ? Array.from(new Set([...(updatedClient.activeSchemes || []), ...profile.detectedSchemes]))
+                      : updatedClient.activeSchemes,
+
+                  // Specific Approvals (Append new ones)
+                  specificApprovals: profile.specificApprovals 
+                      ? Array.from(new Set([...updatedClient.specificApprovals, ...profile.specificApprovals]))
+                      : updatedClient.specificApprovals
+              };
+              
+              // Handle complex funding source + supplements
+              if (profile.fundingSource) {
+                   updatedClient.fundingPackages[0] = { 
+                       ...updatedClient.fundingPackages[0], 
+                       source: profile.fundingSource as FundingSource,
+                       supplements: profile.detectedSupplements || updatedClient.fundingPackages[0].supplements
+                   };
+              }
+
+              alert("Client profile updated from document successfully! Please review the funding details.");
+
+          } catch (error) {
+              console.error("Sync failed", error);
+              alert("Document uploaded, but AI sync failed. Please update profile manually if needed.");
+          } finally {
+              setIsSyncingProfile(false);
+          }
+      }
+
+      onUpdate(updatedClient);
+      setIsUploading(false);
+      
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -153,15 +217,21 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onUpdate })
               {/* Right Column: Documents & Care Plan */}
               <div className="lg:col-span-2 space-y-6">
                    {/* Context Info */}
-                   <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl flex items-start gap-3">
-                       <FileCheck className="text-indigo-600 shrink-0 mt-0.5" size={20} />
-                       <div>
-                           <h4 className="text-sm font-bold text-indigo-900">AI Context Source</h4>
+                   <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl flex items-start gap-3 relative overflow-hidden">
+                       <FileCheck className="text-indigo-600 shrink-0 mt-0.5 relative z-10" size={20} />
+                       <div className="relative z-10">
+                           <h4 className="text-sm font-bold text-indigo-900">Personal Document Folder</h4>
                            <p className="text-sm text-indigo-800 mt-1">
-                               Documents uploaded here are automatically indexed for the AI Invoice Auditor. 
-                               Upload the latest <strong>Care Plan</strong> or <strong>Service Agreement</strong> to ensure validation rules are accurate for {client.name}.
+                               This folder serves as the <strong>AI Knowledge Base</strong> for {client.name}. 
+                               Upload Care Plans, Service Agreements, or Intake Forms here. The AI will index them to validate future invoices against specific client rules.
                            </p>
+                           {isSyncingProfile && (
+                               <div className="mt-2 flex items-center gap-2 text-xs font-bold text-indigo-600 bg-white/50 p-2 rounded w-fit">
+                                   <Loader2 size={12} className="animate-spin" /> Syncing profile data from new document...
+                               </div>
+                           )}
                        </div>
+                       <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-200/20 rounded-full -mr-8 -mt-8 pointer-events-none"></div>
                    </div>
 
                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -169,10 +239,11 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onUpdate })
                            <h3 className="font-bold text-slate-700 text-sm">Client Documents</h3>
                            <button 
                                onClick={() => fileInputRef.current?.click()}
-                               className="text-xs flex items-center gap-2 bg-white border border-slate-200 hover:border-blue-500 hover:text-blue-600 px-3 py-1.5 rounded-lg font-medium transition-all shadow-sm"
+                               disabled={isUploading}
+                               className="text-xs flex items-center gap-2 bg-white border border-slate-200 hover:border-blue-500 hover:text-blue-600 px-3 py-1.5 rounded-lg font-medium transition-all shadow-sm disabled:opacity-70"
                            >
-                               {isUploading ? <span className="animate-spin">⌛</span> : <Upload size={14} />}
-                               Upload Document
+                               {isUploading ? <span className="animate-spin flex gap-1"><Loader2 size={14}/> Uploading...</span> : <Upload size={14} />}
+                               {isUploading ? '' : 'Upload Document'}
                            </button>
                        </div>
                        
@@ -181,7 +252,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onUpdate })
                                <div className="p-8 text-center text-slate-400">
                                    <FileText size={48} className="mx-auto mb-3 opacity-20" />
                                    <p>No documents found.</p>
-                                   <p className="text-xs mt-1">Upload a Care Plan to enable advanced AI auditing.</p>
+                                   <p className="text-xs mt-1">Upload a Care Plan (PDF/Docx) to enable advanced AI auditing.</p>
                                </div>
                            ) : (
                                <div className="divide-y divide-slate-50">
@@ -223,7 +294,7 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, onBack, onUpdate })
         ref={fileInputRef} 
         onChange={handleFileUpload}
         className="hidden" 
-        accept=".pdf"
+        accept=".pdf,.doc,.docx,.xls,.xlsx" // Expanded file support
       />
     </div>
   );

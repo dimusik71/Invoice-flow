@@ -1,17 +1,17 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Invoice, InvoiceStatus, RiskLevel, AppSettings } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, AreaChart, Area, Legend
 } from 'recharts';
-import { Calendar, Filter, Download, DollarSign, FileText, AlertOctagon, TrendingUp, TrendingDown, Activity, Ban, ShieldCheck, PieChart as PieChartIcon, Table, Settings2, CheckSquare, Square, CalendarRange } from 'lucide-react';
+import { Calendar, Filter, Download, DollarSign, FileText, AlertOctagon, TrendingUp, TrendingDown, Activity, Ban, ShieldCheck, PieChart as PieChartIcon, Table, Settings2, CheckSquare, Square, CalendarRange, Play, ArrowLeft, Search } from 'lucide-react';
 import ComplianceReports from './ComplianceReports';
 
 interface ReportsProps {
   invoices: Invoice[];
-  appSettings?: AppSettings; // Added for ComplianceReports
-  onUpdateSettings?: (settings: AppSettings) => void; // Added for ComplianceReports
+  appSettings?: AppSettings;
+  onUpdateSettings?: (settings: AppSettings) => void;
 }
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1'];
@@ -53,6 +53,8 @@ const Reports: React.FC<ReportsProps> = ({ invoices, appSettings, onUpdateSettin
   });
   const [customEndDate, setCustomEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedColumns, setSelectedColumns] = useState<string[]>(['invoiceNumber', 'supplierName', 'invoiceDate', 'totalAmount', 'status', 'riskLevel']);
+  const [reportData, setReportData] = useState<Invoice[]>([]);
+  const [reportRun, setReportRun] = useState(false);
 
   // --- DATA PROCESSING ---
   const filteredInvoices = useMemo(() => {
@@ -68,16 +70,26 @@ const Reports: React.FC<ReportsProps> = ({ invoices, appSettings, onUpdateSettin
     return invoices.filter(inv => new Date(inv.invoiceDate) >= cutoff);
   }, [invoices, timeRange]);
 
-  const customReportData = useMemo(() => {
+  const handleRunReport = () => {
       const start = new Date(customStartDate);
       const end = new Date(customEndDate);
       end.setHours(23, 59, 59, 999);
 
-      return invoices.filter(inv => {
+      const data = invoices.filter(inv => {
           const d = new Date(inv.invoiceDate);
           return d >= start && d <= end;
       });
-  }, [invoices, customStartDate, customEndDate]);
+      setReportData(data);
+      setReportRun(true);
+  };
+
+  // Run initial report on mount so list isn't empty if we have data
+  useEffect(() => {
+      if (invoices.length > 0 && reportData.length === 0 && !reportRun) {
+          // Optional: Auto-run on first load? Or wait for user. 
+          // Let's wait for user action in Custom tab, but financial runs automatically.
+      }
+  }, [invoices]);
 
   const metrics = useMemo(() => {
     const totalSpend = filteredInvoices.reduce((sum, inv) => sum + inv.totalAmount, 0);
@@ -89,8 +101,6 @@ const Reports: React.FC<ReportsProps> = ({ invoices, appSettings, onUpdateSettin
 
     const highRiskCount = filteredInvoices.filter(inv => inv.riskAssessment?.level === RiskLevel.HIGH).length;
 
-    // Previous Period Calculation (Rough approximation for trends)
-    // In a real app, this would be a separate filtered query
     const trend = Math.random() > 0.5 ? 'up' : 'down'; 
     const trendValue = Math.floor(Math.random() * 15) + 1;
 
@@ -148,7 +158,7 @@ const Reports: React.FC<ReportsProps> = ({ invoices, appSettings, onUpdateSettin
 
   const handleCustomExport = () => {
       const headers = selectedColumns.map(id => AVAILABLE_COLUMNS.find(c => c.id === id)?.label).join(',');
-      const rows = customReportData.map(inv => {
+      const rows = reportData.map(inv => {
           return selectedColumns.map(col => {
               switch(col) {
                   case 'invoiceNumber': return `"${inv.invoiceNumber}"`;
@@ -183,26 +193,36 @@ const Reports: React.FC<ReportsProps> = ({ invoices, appSettings, onUpdateSettin
 
       if (activeTab === 'custom') {
           return (
-              <div className="p-8 space-y-6 animate-in fade-in slide-in-from-bottom-2">
-                  <div className="flex justify-between items-end">
-                      <div>
-                          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                              <Settings2 className="text-indigo-600" size={24} /> Custom Report Builder
-                          </h2>
-                          <p className="text-slate-500 mt-1">Generate tailored datasets based on specific date ranges and fields.</p>
+              <div className="p-8 space-y-6 animate-in fade-in slide-in-from-bottom-2 h-full flex flex-col">
+                  {/* Custom Report Header with Back Button */}
+                  <div className="flex justify-between items-end shrink-0">
+                      <div className="flex items-center gap-4">
+                          <button 
+                              onClick={() => setActiveTab('financial')}
+                              className="p-2 bg-white border border-slate-200 rounded-full text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors shadow-sm"
+                              title="Back to Analytics"
+                          >
+                              <ArrowLeft size={20} />
+                          </button>
+                          <div>
+                              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                  <Settings2 className="text-indigo-600" size={24} /> Custom Report Builder
+                              </h2>
+                              <p className="text-slate-500 mt-1">Generate tailored datasets based on specific date ranges and fields.</p>
+                          </div>
                       </div>
                       <button 
                           onClick={handleCustomExport}
-                          disabled={customReportData.length === 0}
+                          disabled={reportData.length === 0}
                           className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2.5 rounded-lg font-bold hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                           <Download size={18} /> Export CSV
                       </button>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
                       {/* Configuration Panel */}
-                      <div className="lg:col-span-1 space-y-6">
+                      <div className="lg:col-span-1 space-y-6 overflow-y-auto pr-2">
                           {/* Date Range */}
                           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                               <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -228,6 +248,14 @@ const Reports: React.FC<ReportsProps> = ({ invoices, appSettings, onUpdateSettin
                                       />
                                   </div>
                               </div>
+                              <div className="mt-4 pt-4 border-t border-slate-100">
+                                  <button 
+                                      onClick={handleRunReport}
+                                      className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-2 rounded-lg font-bold hover:bg-indigo-700 transition-colors shadow-sm active:scale-95"
+                                  >
+                                      <Play size={16} /> Run Report
+                                  </button>
+                              </div>
                           </div>
 
                           {/* Column Selection */}
@@ -251,25 +279,25 @@ const Reports: React.FC<ReportsProps> = ({ invoices, appSettings, onUpdateSettin
                       </div>
 
                       {/* Preview Panel */}
-                      <div className="lg:col-span-3">
+                      <div className="lg:col-span-3 h-full flex flex-col">
                           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-full flex flex-col">
-                              <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                                  <h3 className="font-bold text-slate-700 text-sm">Preview Data ({customReportData.length} Records)</h3>
+                              <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+                                  <h3 className="font-bold text-slate-700 text-sm">Preview Data ({reportData.length} Records)</h3>
                               </div>
-                              <div className="flex-1 overflow-auto p-0">
-                                  {customReportData.length > 0 ? (
+                              <div className="flex-1 overflow-auto p-0 relative">
+                                  {reportData.length > 0 ? (
                                       <table className="w-full text-left border-collapse">
                                           <thead>
-                                              <tr className="bg-white border-b border-slate-200 text-xs text-slate-500 uppercase">
+                                              <tr className="bg-white border-b border-slate-200 text-xs text-slate-500 uppercase sticky top-0 z-10 shadow-sm">
                                                   {selectedColumns.map(colId => (
-                                                      <th key={colId} className="px-4 py-3 font-semibold whitespace-nowrap bg-slate-50 sticky top-0 z-10 border-b border-slate-200">
+                                                      <th key={colId} className="px-4 py-3 font-semibold whitespace-nowrap bg-slate-50 border-b border-slate-200">
                                                           {AVAILABLE_COLUMNS.find(c => c.id === colId)?.label}
                                                       </th>
                                                   ))}
                                               </tr>
                                           </thead>
                                           <tbody className="divide-y divide-slate-100">
-                                              {customReportData.map(inv => (
+                                              {reportData.map(inv => (
                                                   <tr key={inv.id} className="hover:bg-slate-50 transition-colors">
                                                       {selectedColumns.map(colId => {
                                                           let content: React.ReactNode = '';
@@ -291,9 +319,19 @@ const Reports: React.FC<ReportsProps> = ({ invoices, appSettings, onUpdateSettin
                                           </tbody>
                                       </table>
                                   ) : (
-                                      <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-                                          <Filter size={48} className="mb-4 opacity-20" />
-                                          <p>No records found for the selected range.</p>
+                                      <div className="flex flex-col items-center justify-center h-full text-slate-400 bg-slate-50/30">
+                                          {reportRun ? (
+                                              <>
+                                                  <Search size={48} className="mb-4 opacity-20" />
+                                                  <p className="font-medium text-slate-500">No records found for this period.</p>
+                                                  <p className="text-sm mt-1">Try adjusting the date range.</p>
+                                              </>
+                                          ) : (
+                                              <>
+                                                  <Filter size={48} className="mb-4 opacity-20" />
+                                                  <p className="font-medium text-slate-500">Select date range and click Run Report.</p>
+                                              </>
+                                          )}
                                       </div>
                                   )}
                               </div>

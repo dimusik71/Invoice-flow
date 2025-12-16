@@ -33,10 +33,16 @@ export interface NotificationRule {
 }
 
 export interface EmailServiceConfig {
-  provider: 'emailjs';
-  serviceId: string;
-  templateId: string;
-  publicKey: string;
+  provider: 'emailjs' | 'microsoft' | 'google';
+  // EmailJS Specific
+  serviceId?: string;
+  templateId?: string;
+  publicKey?: string;
+  // OAuth Specific
+  accessToken?: string;
+  tokenExpiry?: number;
+  userEmail?: string;
+  clientId?: string; // Optional: User provided Client ID
 }
 
 export interface Notification {
@@ -197,9 +203,19 @@ export interface Client {
   documents: ClientDocument[];
   activePO: string; // Linked PO Number
   
-  // Funding Context for AI
+  // Complex Funding Data
   fundingPackages: FundingPackage[];
-  specificApprovals: string[]; // e.g. ["Restorative Care Pathway", "Assistive Tech > $1500 Approved"]
+  specificApprovals: string[]; 
+  
+  // Advanced Classification
+  dvaCardType?: 'GOLD' | 'WHITE' | 'ORANGE' | null;
+  mmmLevel?: '1' | '2' | '3' | '4' | '5' | '6' | '7'; // Modified Monash Model
+  isIndigenous?: boolean;
+  isClaimsConference?: boolean; // Holocaust Survivor Funding
+  isPrivateFunded?: boolean;
+  
+  // Disease Specific Schemes
+  activeSchemes?: string[]; // e.g. ['caps_continence', 'sas_stoma', 'ndss_diabetes']
 }
 
 export interface EmailDraft {

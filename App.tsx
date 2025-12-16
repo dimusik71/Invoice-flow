@@ -9,20 +9,19 @@ import Settings from './components/Settings';
 import SuperuserDashboard from './components/SuperuserDashboard';
 import ClientList from './components/ClientList';
 import HelpCenter from './components/HelpCenter';
-import OnboardingTour from './components/OnboardingTour';
 import Login from './components/Login';
 import FloatingAgent from './components/FloatingAgent';
-import DevToolsPanel from './components/DevToolsPanel';
 import Reports from './components/Reports';
 import { TenantProvider, useTenant } from './contexts/TenantContext';
 import { ChatProvider } from './contexts/ChatContext';
 import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
-import { MOCK_INVOICES, MOCK_CLIENTS } from './constants';
-import { Invoice, InvoiceStatus, ValidationSeverity, AppSettings, AuditPromptConfig, UserRole, Client } from './types';
+import { Invoice, InvoiceStatus, AppSettings, UserRole } from './types';
 import { performDeepAudit } from './services/geminiService';
 import { validateInvoiceAgainstSystem } from './services/validationService';
 import { assembleAuditPrompt } from './services/promptService';
 import { sendRealEmail } from './services/emailService';
+import { Loader2 } from 'lucide-react';
+import { INITIAL_TENANTS } from './constants';
 
 const DEFAULT_SETTINGS: AppSettings = {
     xero: { connected: true, clientId: 'xero-dev-app', clientSecret: '********', tenantId: 't-001', lastSync: new Date().toISOString() },
@@ -61,7 +60,6 @@ const DEFAULT_SETTINGS: AppSettings = {
     },
     notificationRules: [],
     emailServiceConfig: { provider: 'emailjs', serviceId: '', templateId: '', publicKey: '' },
-    // New Compliance Section
     compliance: {
         orgPrivacyPolicyUrl: '',
         orgTermsOfServiceUrl: '',
@@ -69,14 +67,14 @@ const DEFAULT_SETTINGS: AppSettings = {
         dataSovereigntyRegion: 'AU-SYD',
         auditLogRetentionDays: 90
     },
-    complianceTemplates: [], // Init empty
+    complianceTemplates: [],
     extractionPrompt: '',
     llmKeys: {
-        gemini: '',
+        gemini: process.env.API_KEY || '', // Inject Live Key from Environment
         openai: '',
         anthropic: '',
         grok: '',
-        perplexity: '', // Fixed: initialized as empty string
+        perplexity: '',
     },
     auditPrompt: {
       priceReasonableness: "Analyze price reasonableness for EACH line item. Compare unit prices against standard market rates for support services (e.g. Cleaning ~$50/hr, Personal Care ~$65/hr, Gardening ~$60/hr). Flag any significant deviations.",
@@ -107,33 +105,48 @@ const AppContent = () => {
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showScanner, setShowScanner] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
-
-  // DevTools State
   const [showDevTools, setShowDevTools] = useState(false);
 
   // Contexts
   const { tenant, setTenant, tenants } = useTenant();
   const { addNotification } = useNotifications();
 
-  // --- PERSISTENCE LAYER ---
+  // --- OAUTH CALLBACK HANDLER ---
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && (hash.includes('access_token') || hash.includes('id_token'))) {
+        // We are inside an OAuth Popup redirect
+        try {
+            const params = new URLSearchParams(hash.substring(1));
+            const accessToken = params.get('access_token');
+            const state = params.get('state'); // 'microsoft' or 'google' passed from initiator
+            
+            if (accessToken && window.opener) {
+                // Post message to parent window
+                window.opener.postMessage({ 
+                    type: 'OAUTH_SUCCESS', 
+                    token: accessToken,
+                    provider: state || 'unknown'
+                }, window.location.origin);
+                
+                // Close popup
+                window.close();
+            }
+        } catch (e) {
+            console.error("Error processing OAuth callback", e);
+        }
+    }
+  }, []);
+
+  // --- PERSISTENCE LAYER (INVOICES ONLY for now, Clients/Tenants are DB) ---
   const [invoices, setInvoices] = useState<Invoice[]>(() => {
     try {
       const saved = localStorage.getItem('if_invoices');
-      return saved ? JSON.parse(saved) : MOCK_INVOICES;
+      // STRICT MODE: Start with empty list if nothing saved. No Mocks.
+      return saved ? JSON.parse(saved) : []; 
     } catch (e) {
       console.error("Failed to load invoices from storage", e);
-      return MOCK_INVOICES;
-    }
-  });
-
-  const [clients, setClients] = useState<Client[]>(() => {
-    try {
-      const saved = localStorage.getItem('if_clients');
-      return saved ? JSON.parse(saved) : MOCK_CLIENTS;
-    } catch (e) {
-      console.error("Failed to load clients from storage", e);
-      return MOCK_CLIENTS;
+      return [];
     }
   });
 
@@ -145,9 +158,13 @@ const AppContent = () => {
           return {
               ...DEFAULT_SETTINGS,
               ...parsed,
-              // Ensure deep merge for safety
               emailConfig: { ...DEFAULT_SETTINGS.emailConfig, ...(parsed.emailConfig || {}) },
-              llmKeys: { ...DEFAULT_SETTINGS.llmKeys, ...(parsed.llmKeys || {}) },
+              // Ensure we prefer the Env Var key if the saved one is empty, or allow override
+              llmKeys: { 
+                  ...DEFAULT_SETTINGS.llmKeys, 
+                  ...(parsed.llmKeys || {}),
+                  gemini: parsed.llmKeys?.gemini || process.env.API_KEY || ''
+              },
               notificationRules: parsed.notificationRules || [],
               emailServiceConfig: parsed.emailServiceConfig || { provider: 'emailjs', serviceId: '', templateId: '', publicKey: '' }
           };
@@ -175,7 +192,14 @@ const AppContent = () => {
   };
 
   const handleImpersonate = (tenantId: string) => {
-    const targetTenant = tenants.find(t => t.id === tenantId);
+    // Attempt to find in active tenant list
+    let targetTenant = tenants.find(t => t.id === tenantId);
+    
+    // Fallback: If DB is empty, use INITIAL_TENANTS specifically for the test environment
+    if (!targetTenant && tenantId === 't-dev-001') {
+        targetTenant = INITIAL_TENANTS.find(t => t.id === 't-dev-001');
+    }
+
     if (targetTenant) {
         setTenant(targetTenant);
         setCurrentView('dashboard');
@@ -209,6 +233,17 @@ const AppContent = () => {
      if (selectedInvoice && selectedInvoice.id === updatedInvoice.id) {
        setSelectedInvoice(updatedInvoice);
      }
+  };
+
+  const handleUpdateGlobalSettings = (updates: Partial<AppSettings>) => {
+      setAppSettings(prev => ({
+          ...prev,
+          ...updates
+      }));
+      // Persist immediately
+      try {
+          localStorage.setItem('if_settings', JSON.stringify({ ...appSettings, ...updates }));
+      } catch (e) { console.error("Failed to persist settings", e); }
   };
 
   // --- BACKGROUND AUDIT PROCESSOR ---
@@ -346,14 +381,18 @@ const AppContent = () => {
       ? invoices 
       : invoices.filter(inv => inv.tenantId === tenant?.id);
   
-  const visibleClients = (userRole === 'superuser' && (currentView === 'superuser' || currentView.startsWith('superuser_')))
-      ? clients
-      : clients.filter(c => c.tenantId === tenant?.id);
+  // Clients are now handled internally by ClientList via DB Service, no need to pass
 
   const renderContent = () => {
     if (userRole === 'superuser' && (currentView === 'superuser' || currentView === 'superuser_audit' || currentView === 'superuser_settings')) {
         const tab = currentView === 'superuser_audit' ? 'audit' : currentView === 'superuser_settings' ? 'global_config' : 'orgs';
-        return <SuperuserDashboard onImpersonate={handleImpersonate} initialTab={tab} />;
+        return <SuperuserDashboard 
+            onImpersonate={handleImpersonate} 
+            initialTab={tab} 
+            apiKey={appSettings.llmKeys.gemini}
+            emailServiceConfig={appSettings.emailServiceConfig} // Pass config for invite emails
+            onUpdateSettings={handleUpdateGlobalSettings}
+        />;
     }
 
     if (selectedInvoice && currentView === 'detail') {
@@ -386,7 +425,7 @@ const AppContent = () => {
       case 'reports':
         return <Reports invoices={visibleInvoices} appSettings={appSettings} onUpdateSettings={setAppSettings} />;
       case 'clients':
-        return <ClientList clients={visibleClients} onUpdateClient={() => {}} />;
+        return <ClientList clients={[]} onUpdateClient={() => {}} apiKey={appSettings.llmKeys.gemini} />;
       case 'settings':
         return <Settings settings={appSettings} onSave={setAppSettings} />;
       case 'ai-support':
@@ -399,6 +438,15 @@ const AppContent = () => {
   };
 
   if (!isAuthenticated) {
+    // Check if we are inside a popup (OAuth flow) - don't render login
+    if (window.opener && window.location.hash.includes('access_token')) {
+        return <div className="flex items-center justify-center h-screen bg-white">
+            <div className="text-center">
+                <Loader2 className="animate-spin h-8 w-8 mx-auto text-indigo-600 mb-2" />
+                <p className="text-slate-600">Completing authentication...</p>
+            </div>
+        </div>;
+    }
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 

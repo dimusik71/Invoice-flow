@@ -1,5 +1,113 @@
 
-import { Invoice, InvoiceStatus, ValidationSeverity, PurchaseOrder, RiskLevel, Client } from './types';
+import { Invoice, InvoiceStatus, ValidationSeverity, PurchaseOrder, RiskLevel, Client, TenantConfig } from './types';
+
+// --- INITIAL TENANT BOOTSTRAP DATA ---
+export const INITIAL_TENANTS: TenantConfig[] = [
+  {
+    id: 't-dev-001',
+    name: 'InvoiceFlow Labs (BETA)',
+    primaryColor: '#7c3aed', // violet-600
+    secondaryColor: '#4c1d95', // violet-900
+    accentColor: '#d946ef', // fuchsia-500
+    features: { aiAudit: true, xeroIntegration: true, poMatching: true, spendingAnalysis: true, emailIngestion: true },
+    status: 'BETA',
+    createdAt: '2023-01-01',
+    documentSettings: {
+        headerText: 'InvoiceFlow Labs (BETA)',
+        subHeaderText: 'Development Environment',
+        footerText: 'Confidential - Internal Use Only | ABN 12 345 678 901',
+        showLogo: true
+    }
+  },
+  {
+    id: 't-001',
+    name: 'CareFirst Solutions',
+    primaryColor: '#2563eb', // blue-600
+    secondaryColor: '#1e40af', // blue-800
+    accentColor: '#3b82f6', // blue-500
+    features: { aiAudit: true, xeroIntegration: true, poMatching: true, spendingAnalysis: true, emailIngestion: true },
+    status: 'ACTIVE',
+    createdAt: '2023-01-15',
+    documentSettings: {
+        headerText: 'CareFirst Solutions',
+        subHeaderText: 'Excellence in Care',
+        footerText: 'CareFirst Solutions Pty Ltd | ABN 88 999 111 222 | Privacy Policy available at carefirst.com.au',
+        showLogo: true
+    }
+  },
+  {
+    id: 't-002',
+    name: 'GreenLeaf Support',
+    primaryColor: '#059669', // emerald-600
+    secondaryColor: '#065f46', // emerald-800
+    accentColor: '#10b981', // emerald-500
+    features: { aiAudit: true, xeroIntegration: false, poMatching: true, spendingAnalysis: false, emailIngestion: false },
+    status: 'ACTIVE',
+    createdAt: '2023-03-22',
+    documentSettings: {
+        headerText: 'GreenLeaf Support Services',
+        subHeaderText: 'Supporting Your Independence',
+        footerText: 'GreenLeaf Support | Registered NDIS Provider | 1300 000 000',
+        showLogo: false
+    }
+  },
+  {
+    id: 't-003',
+    name: 'Horizon Health',
+    primaryColor: '#6366f1', // indigo-500
+    secondaryColor: '#312e81', // indigo-900
+    accentColor: '#818cf8', // indigo-400
+    features: { aiAudit: false, xeroIntegration: true, poMatching: false, spendingAnalysis: false, emailIngestion: true },
+    status: 'ACTIVE',
+    createdAt: '2023-06-10',
+    documentSettings: {
+        headerText: 'Horizon Health',
+        subHeaderText: '',
+        footerText: 'Horizon Health Ltd. All rights reserved.',
+        showLogo: true
+    }
+  }
+];
+
+// --- GOVERNMENT REFERENCE DATA (Live Schedule 2025) ---
+export const GOV_FUNDING_DATA = {
+    // Official Daily Rates for Support at Home (2025 Schedule)
+    // Annual amounts are calculated as Daily Rate x 365
+    SAH_DAILY_RATES: {
+        'SAH_LEVEL_1': 29.40,  // ~$10,731.00 / yr
+        'SAH_LEVEL_2': 43.93,  // ~$16,034.45 / yr
+        'SAH_LEVEL_3': 60.18,  // ~$21,965.70 / yr
+        'SAH_LEVEL_4': 81.36,  // ~$29,696.40 / yr
+        'SAH_LEVEL_5': 108.76, // ~$39,697.40 / yr
+        'SAH_LEVEL_6': 131.82, // ~$48,114.30 / yr
+        'SAH_LEVEL_7': 159.31, // ~$58,148.15 / yr
+        'SAH_LEVEL_8': 213.99  // ~$78,106.35 / yr
+    },
+    // Modified Monash Model (MMM) Remote Area Loadings (Multiplier on Base Subsidy)
+    MMM_LOADINGS: {
+        '1': 1.00, // Major Cities
+        '2': 1.00, // Inner Regional
+        '3': 1.00, // Outer Regional
+        '4': 1.00, // Remote Fringe
+        '5': 1.15, // Remote (+15%)
+        '6': 1.40, // Remote (+40%)
+        '7': 1.50  // Very Remote (+50%)
+    },
+    // Specific Supplements (Daily Rates)
+    SUPPLEMENT_DAILY_RATES: {
+        'dementia_cognition': 11.50, // 10% of Level 4 approx (Standard Rate)
+        'oxygen': 1.70,              // Standard Oxygen
+        'enteral_feeding': 2.10,     // Bolus
+        'veterans_supplement': 4.10  // DVA Supplement
+    },
+    // Specific Disease Schemes
+    DISEASE_SCHEMES: {
+        'caps_continence': 'Continence Aids Payment Scheme (CAPS)',
+        'sas_stoma': 'Stoma Appliance Scheme (SAS)',
+        'ndss_diabetes': 'National Diabetes Services Scheme (NDSS)',
+        'hsp_hearing': 'Hearing Services Program (HSP)'
+    }
+};
 
 export const MOCK_CLIENTS: Client[] = [
   {
@@ -10,7 +118,7 @@ export const MOCK_CLIENTS: Client[] = [
     phone: '0400 123 456',
     integrationId: 'LOOK-8821',
     status: 'ACTIVE',
-    totalBudgetCap: 15000.00,
+    totalBudgetCap: 78106.35, // Level 8
     totalBudgetUsed: 2000.00,
     budgetRenewalDate: '2023-12-31',
     activePO: 'PO-998877',
@@ -21,7 +129,10 @@ export const MOCK_CLIENTS: Client[] = [
     fundingPackages: [
       { source: 'SAH_LEVEL_8', startDate: '2023-01-01', supplements: ['Dementia and Cognition Supplement', 'Oxygen Supplement'] }
     ],
-    specificApprovals: ['Complex Home Modification (Ramp) > $2000']
+    specificApprovals: ['Complex Home Modification (Ramp) > $2000'],
+    dvaCardType: null,
+    mmmLevel: '1',
+    activeSchemes: []
   },
   {
     id: 'CLIENT-202',
@@ -31,7 +142,7 @@ export const MOCK_CLIENTS: Client[] = [
     phone: '0400 999 888',
     integrationId: 'LOOK-9932',
     status: 'ACTIVE',
-    totalBudgetCap: 3000.00,
+    totalBudgetCap: 21965.70, // Level 3
     totalBudgetUsed: 2800.00,
     budgetRenewalDate: '2023-12-31',
     activePO: 'PO-554433',
@@ -41,7 +152,10 @@ export const MOCK_CLIENTS: Client[] = [
     fundingPackages: [
       { source: 'SAH_LEVEL_3', startDate: '2023-06-01', supplements: [] }
     ],
-    specificApprovals: []
+    specificApprovals: [],
+    dvaCardType: 'WHITE',
+    mmmLevel: '2',
+    activeSchemes: ['ndss_diabetes']
   },
   {
     id: 'CLIENT-303',
@@ -59,7 +173,10 @@ export const MOCK_CLIENTS: Client[] = [
     fundingPackages: [
       { source: 'NDIS', startDate: '2022-01-01', supplements: [] }
     ],
-    specificApprovals: ['Assistive Technology - Comm Device']
+    specificApprovals: ['Assistive Technology - Comm Device'],
+    dvaCardType: null,
+    mmmLevel: '1',
+    activeSchemes: []
   }
 ];
 
@@ -72,7 +189,7 @@ export const MOCK_POS: Record<string, PurchaseOrder> = {
     budgetRemaining: 1500.00,
     
     // Setup for UNDERSPEND Risk (High Cap, Low Spend, Quarter ending soon)
-    quarterlyBudgetCap: 15000.00,
+    quarterlyBudgetCap: 19526.59, // Level 8 Quarterly
     currentQuarterSpend: 2000.00, 
     currentQuarterEnd: '2023-11-15', // Assume current date is late Oct 2023
 
@@ -87,8 +204,8 @@ export const MOCK_POS: Record<string, PurchaseOrder> = {
     budgetRemaining: 200.00,
 
     // Setup for OVERSPEND Risk (Low Cap, High Spend)
-    quarterlyBudgetCap: 3000.00,
-    currentQuarterSpend: 2800.00,
+    quarterlyBudgetCap: 5491.43, // Level 3 Quarterly
+    currentQuarterSpend: 5300.00, // Near limit
     currentQuarterEnd: '2023-12-31',
 
     validFrom: '2023-06-01',

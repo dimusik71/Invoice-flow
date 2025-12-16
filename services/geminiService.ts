@@ -42,54 +42,62 @@ OFFICIAL APPROVED CONTRACTOR LIST (INTERNAL DB):
 
 // Government Knowledge Base for AI Context (UPDATED TO SUPPORT AT HOME)
 const GOV_RATES_KB = `
-GOVERNMENT SUBSIDY & RULE KNOWLEDGE BASE (SUPPORT AT HOME REFORMS):
+GOVERNMENT SUBSIDY & RULE KNOWLEDGE BASE (SUPPORT AT HOME REFORMS 2025):
 
 *** IMPORTANT: HCP HAS BEEN REPLACED BY "SUPPORT AT HOME" (8 CLASSIFICATION LEVELS) ***
 
-SUPPORT AT HOME (SAH) - CLASSIFICATION & EXPECTED SERVICE SCOPE:
-- Level 1 (Low Needs): Domestic assistance (cleaning), meals, transport, basic gardening. NOT Clinical Care.
-- Level 2 (Low-Med Needs): Social support, shopping, basic personal care assistance.
-- Level 3 (Medium Needs): Regular personal care, medication prompting, respite.
-- Level 4 (Medium-High Needs): Higher frequency personal care, allied health visits (physio/podiatry).
-- Level 5 (High Needs): Complex personal care, wound management, nursing oversight.
-- Level 6 (High Needs): Intensive daily visits, mobility assistance, continence management.
-- Level 7 (Very High/Acute): Clinical nursing, complex health management, high-risk cognitive support.
-- Level 8 (Complex/End of Life): 24/7 capability, palliative care, complex medical equipment (oxygen/enteral).
+SUPPORT AT HOME (SAH) - 8-TIER CLASSIFICATION SYSTEM (OFFICIAL 2025 DAILY RATES):
+- Level 1: $29.40 / day (~$10,731 / yr)
+- Level 2: $43.93 / day (~$16,034 / yr)
+- Level 3: $60.18 / day (~$21,965 / yr)
+- Level 4: $81.36 / day (~$29,696 / yr)
+- Level 5: $108.76 / day (~$39,697 / yr)
+- Level 6: $131.82 / day (~$48,114 / yr)
+- Level 7: $159.31 / day (~$58,148 / yr)
+- Level 8: $213.99 / day (~$78,106 / yr)
 
-RULE: Services must align with the Classification Level. 
-- A Level 1/2 client invoicing for "Complex Nursing" or "High Cost Equipment" is a SCOPE MISMATCH (Risk).
-- A Level 8 client invoicing for large amounts of basic "Gardening" while neglecting clinical care needs requires review.
+MODIFIED MONASH MODEL (MMM) - REMOTE AREA LOADINGS (Multiplier on Daily Rate):
+- MMM 1-4 (Major Cities to Rural): Standard funding (100% of price guide).
+- MMM 5 (Remote Fringe): +15% loading.
+- MMM 6 (Remote): +40% loading.
+- MMM 7 (Very Remote): +50% loading.
+AI MUST factor this loading when calculating "Reasonable Price" for services in these areas.
+
+DUAL FUNDING & DISEASE SPECIFIC SCHEMES (DOUBLE DIPPING RULES):
+1. CONTINENCE AIDS PAYMENT SCHEME (CAPS):
+   - If a client has 'caps_continence' active, they receive a separate annual payment (~$700) for pads/aids.
+   - RULE: Do NOT approve bulk invoices for incontinence pads from the SAH Package if the client is receiving CAPS, unless the clinical need EXCEEDS the CAPS allowance. Flag for "Double Dipping Review".
+
+2. STOMA APPLIANCE SCHEME (SAS):
+   - If a client has 'sas_stoma' active, stoma bags/appliances are free/subsidized via Stoma Associations.
+   - RULE: Reject invoices for "Stoma Bags" billed to the package. The package can pay for *nursing care* to assist with stoma, but NOT the product itself (which is covered by SAS).
+
+3. NATIONAL DIABETES SERVICES SCHEME (NDSS):
+   - If a client has 'ndss_diabetes' active, needles/syringes/test strips are subsidized.
+   - RULE: Reject invoices for full-price diabetes consumables.
+
+4. HEARING SERVICES PROGRAM (HSP):
+   - Covers hearing assessments and devices.
+   - RULE: Flag hearing aid invoices to ensure HSP eligibility was utilized first.
+
+5. DVA GOLD CARD: 
+   - Covers all clinically necessary health care. 
+   - RULE: Reject "Nursing" or "Medical" invoices on SAH package if Gold Card exists.
 
 ALLOWABLE SERVICE GROUPS (QUARTERLY BUDGETS APPLY):
 1. Clinical Care (Nursing, Allied Health)
 2. Independence (Personal Care, Domestic Assistance)
 3. Everyday Living (Meals, Transport, Gardening)
 
-COMMON SUPPLEMENTS:
-- Dementia and Cognition: Additional funding for assessed cognitive impairment.
-- Oxygen Supplement: Specific for medical oxygen costs.
-- Enteral Feeding: For prescribed enteral feeding.
-
 SPECIFIC PROGRAM RULES:
-1. Restorative Care (STRC): 
-   - Time-limited (8 weeks max). 
-   - GOAL: Re-ablement/Independence. 
-   - PRIORITY: Therapy, aids, minor mods. 
-   - EXCLUDED: Long-term ongoing domestic care.
-
-2. Palliative Care:
-   - GOAL: End-of-life comfort.
-   - PRIORITY: Pain management, 24/7 nursing access, comfort equipment.
-   - EXCLUDED: Remedial/Curative therapies.
-
+1. Restorative Care (STRC): Time-limited (8 weeks). GOAL: Re-ablement.
+2. Palliative Care: GOAL: End-of-life comfort. Priority on pain management/nursing.
 3. Assistive Technology (AT) Rules:
    - Low Risk (<$1500): Auto-approve if allowed in Care Plan.
    - Mid/High Risk (>$1500): REQUIRES Specific Written Approval (OT Assessment) attached to client file.
 
 EXCLUSIONS (ALL PACKAGES):
-- General income support (rent, bills, groceries).
-- Entertainment/Gambling.
-- Travel costs for holidays.
+- General income support, Rent, Electricity (unless medically required life support), Gambling, Holidays.
 `;
 
 // Helper to get client with optional override
@@ -145,6 +153,93 @@ export const extractInvoiceDataFromImage = async (base64Image: string, mimeType:
 };
 
 /**
+ * 13. Extract Client Profile from Document (Care Plan / Intake Form)
+ * ROUTING: COMPLEX (Gemini 3 Pro)
+ * Reasoning: Documents are dense (PDF/Word) and require complex extraction of specific funding codes and dates.
+ */
+export const extractClientProfileFromDocument = async (
+    base64Data: string, 
+    mimeType: string, 
+    apiKeyOverride?: string
+): Promise<Partial<Client> & { 
+    fundingSource?: string, 
+    mmmLevel?: string, 
+    dvaCardType?: string,
+    detectedSchemes?: string[],
+    detectedSupplements?: string[],
+    isIndigenous?: boolean,
+    isClaimsConference?: boolean,
+    missingData?: string[]
+}> => {
+    try {
+        const ai = getAiClient(apiKeyOverride);
+        const model = getOptimalModel('COMPLEX');
+
+        const prompt = `
+            You are a Clinical Data Entry Specialist for Aged Care.
+            Analyze the attached document (Care Plan, Intake Form, or Funding Agreement).
+            
+            Extract the following client details into a JSON object. Be extremely precise with Funding Levels and Supplements.
+            
+            1. Basic Info: Name, Email, Phone, Integration ID (Ref/NDIS No).
+            2. Funding Source: 'SAH_LEVEL_1' to 'SAH_LEVEL_8', 'NDIS', 'CHSP', 'DVA'. 
+               - Look for "Level 3 Package" -> SAH_LEVEL_3.
+            3. MMM Level: Look for "Modified Monash Model" or address based remoteness. Return '1' to '7'. If unsure/not found, return null.
+            4. DVA Card: Look for 'Gold Card', 'White Card', 'Orange Card'. Return 'GOLD', 'WHITE', 'ORANGE' or null.
+            5. Disease Specific Schemes: Look for keywords: "CAPS", "Continence Aids", "Stoma", "SAS", "NDSS", "Diabetes", "Hearing Services", "HSP".
+               - Return array 'detectedSchemes': ['caps_continence', 'sas_stoma', 'ndss_diabetes', 'hsp_hearing'].
+            6. Supplements: Look for keywords: "Dementia", "Cognition", "Oxygen", "Enteral Feeding", "Veterans Supplement". Return array 'detectedSupplements': ['dementia_cognition', 'oxygen', 'enteral_feeding', 'veterans_supplement'].
+            7. Special Status: 
+               - "Aboriginal" or "Torres Strait Islander" -> isIndigenous: true.
+               - "Claims Conference" or "Holocaust" -> isClaimsConference: true.
+            8. Specific Approvals: Extract high cost items approved (e.g. "Wheelchair approved", "Bathroom Mod").
+            9. Missing Data: List any critical fields that appear to be missing from the document (e.g. "Missing Date of Birth", "Missing DVA Number").
+
+            OUTPUT JSON STRICTLY:
+            {
+                "name": "string",
+                "email": "string",
+                "phone": "string",
+                "integrationId": "string",
+                "totalBudgetCap": number,
+                "budgetRenewalDate": "YYYY-MM-DD",
+                "fundingSource": "string", 
+                "mmmLevel": "string",
+                "dvaCardType": "string",
+                "detectedSchemes": ["string"],
+                "detectedSupplements": ["string"],
+                "isIndigenous": boolean,
+                "isClaimsConference": boolean,
+                "specificApprovals": ["string"],
+                "missingData": ["string"]
+            }
+        `;
+
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: {
+                parts: [
+                    { inlineData: { mimeType, data: base64Data } },
+                    { text: prompt }
+                ]
+            },
+            config: {
+                responseMimeType: 'application/json'
+            }
+        });
+
+        const text = response.text;
+        if (!text) throw new Error("No response from AI extraction");
+        
+        return JSON.parse(text);
+
+    } catch (error) {
+        console.error("Client Profile Extraction Error:", error);
+        throw error;
+    }
+};
+
+/**
  * 2. Deep Audit (Forensic Specialist)
  * ROUTING: COMPLEX (Gemini 3 Pro)
  * Reasoning: Requires deep reasoning, policy cross-referencing, and complex rule adherence. 
@@ -168,16 +263,20 @@ export const performDeepAudit = async (
     const poContext = poNumber && MOCK_POS[poNumber] ? JSON.stringify(MOCK_POS[poNumber], null, 2) : "NO_PO_FOUND";
 
     // Inject Client Funding Context with detailed financial tracking
+    // UPDATED: Now includes MMM, DVA, and Specific Supplements logic
     const clientFundingContext = client ? `
-      CLIENT SPECIFIC FUNDING PROFILE (CRITICAL):
+      CLIENT SPECIFIC FUNDING PROFILE (CRITICAL FOR VALIDATION):
       - Name: ${client.name}
       - Status: ${client.status}
-      - Funding Classification (Level 1-8): ${client.fundingPackages.map(p => p.source).join(', ')}
-      - Active Supplements: ${client.fundingPackages.flatMap(p => p.supplements).join(', ') || 'None'}
-      - Specific Approvals (e.g. AT/Mods): ${client.specificApprovals?.join(', ') || 'None'}
-      - Total Annual Budget Cap: $${client.totalBudgetCap}
-      - Funds Used Year-to-Date: $${client.totalBudgetUsed}
-    ` : "NO_CLIENT_LINKED - Assume Standard Level 3 Rules for generic audit.";
+      - Primary Funding: ${client.fundingPackages.map(p => p.source).join(', ')} (Levels 1-8 determine permitted scope).
+      - MMM Location: ${client.mmmLevel || '1'}. (If >= 5, allow +15-50% price loading on services).
+      - DVA Status: ${client.dvaCardType || 'None'}. (If GOLD, medical/nursing items should often be billed to DVA, NOT the package. Flag potential dual-funding error).
+      - Active Disease Schemes: ${client.activeSchemes?.join(', ') || 'None'}. (If present, CHECK FOR DOUBLE DIPPING. E.g. If 'caps_continence' is active, do not allow bulk pads on package).
+      - Active Supplements: ${client.fundingPackages.flatMap(p => p.supplements).join(', ') || 'None'}. (e.g. 'Oxygen' permits oxygen tank rental).
+      - Special Status: Indigenous: ${client.isIndigenous}, Claims Conf: ${client.isClaimsConference}.
+      - Specific Approvals (Care Plan): ${client.specificApprovals?.join(', ') || 'None'}. (Items >$1500 MUST be here).
+      - Budget: Cap $${client.totalBudgetCap}, Used $${client.totalBudgetUsed}.
+    ` : "NO_CLIENT_LINKED - Assume Standard Level 3 Rules for generic audit. No client-specific overrides available.";
 
     const basePrompt = customPromptOverride || `
       You are a Forensic Audit AI Specialist with deep expertise in Australian Government Subsidies (Aged Care/NDIS).
@@ -187,7 +286,8 @@ export const performDeepAudit = async (
       
       1. PRICE REASONABLENESS (Forensic Check):
          - Compare unit prices against the NDIS Price Guide 2023-24 (latest available equivalents) and Market Rates.
-         - Flag any service > 10% above benchmark.
+         - CHECK CLIENT MMM LEVEL: If Client MMM is 5, 6, or 7, allow higher prices (Remote Area Loading). Do not flag as overprice if within loading limits (MMM 6 = +40%, MMM 7 = +50%).
+         - Flag any service > 10% above benchmark (adjusted for MMM).
          - Analyze 'Weekend' or 'After Hours' loadings. Verify if the 'serviceDate' was actually a weekend/public holiday.
 
       2. FRAUD INDICATORS (Red Flags):
@@ -201,10 +301,10 @@ export const performDeepAudit = async (
          - Verify ABN validity format.
          - Flag if the supplier name suggests a conflict of interest (e.g. same surname as client - requires manual check).
 
-      4. FUNDING PACKAGE SCOPE (Critical Scope Creep Check):
+      4. FUNDING PACKAGE SCOPE & DOUBLE DIPPING CHECK (Critical):
          - Use the "CLIENT SPECIFIC FUNDING PROFILE".
-         - IF Client is Level 1/2: Flag HIGH RISK if invoice includes Clinical Nursing, Wound Care, or Equipment >$500.
-         - IF Client is Level 8: Flag RISK if invoice is purely 'Domestic Assistance' without clinical oversight (potential neglect).
+         - CHECK ACTIVE SCHEMES: If client has 'sas_stoma' (Stoma Scheme) or 'caps_continence' (CAPS), STRICTLY REJECT invoices for products covered by those schemes (stoma bags, pads) unless justification is provided.
+         - DUAL FUNDING CHECK: If Client has DVA GOLD CARD and invoice is for "Nursing" or "Medical", FLAG WARN: "Potential DVA overlap. Check if this should be claimed via DVA."
          - SPECIFIC APPROVALS: Any item >$1500 MUST exist in 'Specific Approvals'. If missing, FAIL.
 
       5. POLICY COMPLIANCE:
@@ -632,7 +732,7 @@ export const generateRejectionDrafts = async (
             
             ---
             
-            TASK 1: VENDOR EMAIL (${invoice.supplierName})
+            TASK 1: VENDOR EMAIL (STRICTLY PROFESSIONAL/TECHNICAL)
             - Goal: Technical resolution and correction.
             - Tone: Professional, firm, transactional.
             - Content Instructions:
@@ -641,9 +741,9 @@ export const generateRejectionDrafts = async (
               3. Reference government rules (e.g., 'A New Tax System (GST) Act 1999' for invalid ABNs, 'NDIS Pricing Arrangements' for price caps).
               4. Reference 'Organisational Procurement Policy' (e.g., missing PO numbers).
             
-            TASK 2: CLIENT EMAIL (${client ? client.name : 'Client'})
+            TASK 2: CLIENT EMAIL (STRICTLY SIMPLE/SUPPORTIVE)
             - Goal: Transparency, education, and reassurance.
-            - Tone: Empathetic, simple language (Grade 8 reading level), supportive.
+            - Tone: Empathetic, VERY SIMPLE language (Grade 8 reading level), supportive.
             - Content Instructions:
               1. Explain clearly WHY it was rejected using simple terms (e.g., instead of "Invalid GST calculation", say "The tax amount on the bill was incorrect").
               2. Provide justification by referencing legislation/rules but keeping it simple (e.g. "Under the Support at Home rules, we cannot pay for...").
@@ -651,6 +751,8 @@ export const generateRejectionDrafts = async (
               4. Explain next steps (e.g., "You do not need to do anything right now. We will process payment once the provider fixes this").
               5. MANDATORY: Provide options for feedback and complaint to external agencies.
                  - Include: "If you are unhappy with this decision, you can contact the Aged Care Quality and Safety Commission (ACQSC) on 1800 951 822 or visit www.agedcarequality.gov.au".
+            
+            IMPORTANT: The content of these two emails must be COMPLETELY DIFFERENT. Do not copy paste. The client email must feel personal and caring. The vendor email must feel strict and business-like.
             
             ---
             

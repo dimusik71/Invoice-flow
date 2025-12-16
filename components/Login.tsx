@@ -1,8 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
+import { checkDatabaseConnection } from '../services/dbService';
 import { useTenant } from '../contexts/TenantContext';
-import { Lock, Mail, ArrowRight, Loader2, ShieldCheck, Wifi, WifiOff, CheckCircle2 } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Loader2, ShieldCheck, Wifi, WifiOff, CheckCircle2, AlertCircle, LayoutTemplate } from 'lucide-react';
 import { UserRole } from '../types';
 import LegalPolicyViewer, { PolicyType } from './LegalPolicyViewer';
 
@@ -14,75 +15,151 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isOAuthLoading, setIsOAuthLoading] = useState<string | null>(null); // 'google' | 'microsoft' | null
   const [error, setError] = useState<string | null>(null);
-  const { setTenant, tenants } = useTenant();
+  
+  // Connection Status
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
+  const [connectionMsg, setConnectionMsg] = useState('Checking connection...');
+
+  const { setTenant, tenants, isLoading: isTenantsLoading } = useTenant();
   const [showLegalModal, setShowLegalModal] = useState(false);
   const [legalModalType, setLegalModalType] = useState<PolicyType>('privacy');
 
-  const isOfflineMode = !supabase;
+  useEffect(() => {
+      // Check Real Connection on Mount
+      const checkParams = async () => {
+          const result = await checkDatabaseConnection();
+          setIsConnected(result.success);
+          setConnectionMsg(result.success ? 'Connected to Supabase' : 'Offline / Demo Mode');
+      };
+      checkParams();
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError(null);
-
-    // Simulate Network Delay for smooth UX
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    try {
-      // 0. Superuser Check (Hardcoded for demo bypass)
-      if ((email === 'super@invoiceflow.com' && password === 'root') || 
-          (email === 'dmitry@smplsinnovation.com.au' && password === 'Dnns2011368@')) {
-          onLoginSuccess('superuser');
-          setIsLoading(false);
-          return;
-      }
-
-      // 1. Try Actual Supabase Auth (If configured)
+      // Check for existing session (Handling OAuth Redirect)
       if (supabase) {
+          supabase.auth.getSession().then(({ data: { session } }) => {
+              if (session?.user?.email) {
+                  // User is already logged in (e.g. returned from SSO)
+                  console.log("Session found:", session.user.email);
+                  resolveUserContext(session.user.email, true);
+              }
+          });
+      }
+  }, [tenants]); // Re-run if tenants load late
+
+  // Reusable Logic to Map Email -> Tenant -> Role
+  const resolveUserContext = async (userEmail: string, isSSO: boolean = false) => {
+      setIsLoading(true);
+      setError(null);
+
+      // Simulate slight delay for UX if not SSO (SSO already had redirect delay)
+      if (!isSSO) await new Promise(resolve => setTimeout(resolve, 800));
+
+      try {
+          const lowerEmail = userEmail.toLowerCase();
+
+          // 0. Superuser Check
+          if ((lowerEmail === 'super@invoiceflow.com') || 
+              (lowerEmail === 'dmitry@smplsinnovation.com.au')) {
+              onLoginSuccess('superuser');
+              setIsLoading(false);
+              return;
+          }
+
+          // 1. Tenant Resolution
+          if (tenants.length === 0) {
+              throw new Error('No organizations found. Please login as Superuser to create one.');
+          }
+
+          // Strict Logic: Find tenant where email domain matches tenant name or specific agency rules
+          // In a real DB, we would query the 'users' table to find the tenant_id for this email.
+          // Here we simulate that lookup.
+          let foundTenant = tenants.find(t => lowerEmail.includes(t.name.toLowerCase().split(' ')[0].replace(/[^a-z]/g, '')));
+          
+          // Legacy/Demo Fallbacks
+          if (!foundTenant) {
+              if (lowerEmail.includes('agency-a')) foundTenant = tenants.find(t => t.id === 't-001');
+              else if (lowerEmail.includes('agency-b')) foundTenant = tenants.find(t => t.id === 't-002');
+              else if (lowerEmail.includes('agency-c')) foundTenant = tenants.find(t => t.id === 't-003');
+          }
+
+          if (foundTenant) {
+              setTenant(foundTenant);
+              // In real app, role comes from DB. Defaulting to Admin for demo convenience.
+              onLoginSuccess('admin'); 
+          } else {
+              // If logged in via SSO but no tenant found
+              if (isSSO) {
+                  // Fallback: Assign to the first available tenant or show error
+                  // setTenant(tenants[0]);
+                  // onLoginSuccess('admin');
+                  throw new Error('No organisation found for this email address. Please contact support.');
+              } else {
+                  // Fallback for demo password login
+                  setTenant(tenants[0]);
+                  onLoginSuccess('admin');
+              }
+          }
+
+      } catch (err: any) {
+          setError(err.message || 'Login failed.');
+          // If SSO failed context resolution, verify if we should sign them out
+          if (isSSO) await supabase.auth.signOut(); 
+      } finally {
+          setIsLoading(false);
+      }
+  };
+
+  const handlePasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isConnected && supabase) {
+        // Try Real Auth first
         const { error: authError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
+            email,
+            password,
         });
         
-        if (authError) {
-             // If Auth fails, check if it's a known Demo Account. 
-             // If so, suppress the error to allow the demo to proceed locally.
-             const isDemoAccount = email.includes('agency-') && password === 'demo123';
-             if (!isDemoAccount) {
-                 throw authError;
-             }
-        }
-      }
+        // If Auth fails, check if it's a known Demo Account (agency-X)
+        const isDemoAccount = email.includes('agency-') && password === 'demo123';
+        // Allow hardcoded superusers to bypass if DB connection/auth fails (Fail-safe for demo)
+        const isSuperMock = (email === 'super@invoiceflow.com' || email === 'dmitry@smplsinnovation.com.au') && (password === 'root' || password === 'password');
 
-      // 2. Tenant Resolution
-      const foundTenant = tenants.find(t => email.toLowerCase().includes(t.name.toLowerCase().split(' ')[0].replace(/[^a-z]/g, '')));
-      
-      if (foundTenant) {
-          setTenant(foundTenant);
-          onLoginSuccess('admin');
-      } else if (email.includes('agency-a')) { 
-          const t = tenants.find(t => t.id === 't-001');
-          if (t) setTenant(t);
-          onLoginSuccess('admin');
-      } else if (email.includes('agency-b')) {
-          const t = tenants.find(t => t.id === 't-002');
-          if (t) setTenant(t);
-          onLoginSuccess('admin');
-      } else if (email.includes('agency-c')) {
-          const t = tenants.find(t => t.id === 't-003');
-          if (t) setTenant(t);
-          onLoginSuccess('admin');
-      } else {
-          setTenant(tenants[0]);
-          onLoginSuccess('admin');
+        if (authError && !isDemoAccount && !isSuperMock) {
+            setError('Invalid credentials. If you are a Superuser using a demo environment, try password "root".');
+            return;
+        }
+    }
+    // Proceed to context resolution
+    resolveUserContext(email, false);
+  };
+
+  const handleOAuthLogin = async (provider: 'google' | 'azure') => {
+      if (!isConnected) {
+          setError("SSO requires a live database connection.");
+          return;
       }
       
-    } catch (err: any) {
-      setError('Invalid credentials. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
+      setIsOAuthLoading(provider === 'azure' ? 'microsoft' : 'google');
+      setError(null);
+
+      try {
+          const { error } = await supabase.auth.signInWithOAuth({
+              provider: provider,
+              options: {
+                  redirectTo: window.location.origin, // Returns to this page, caught by useEffect
+                  scopes: provider === 'azure' ? 'email profile' : 'email profile'
+              }
+          });
+          if (error) throw error;
+      } catch (err: any) {
+          console.error("OAuth Error:", err);
+          if (err.message?.includes('provider is not enabled')) {
+             setError(`${provider === 'azure' ? 'Microsoft' : 'Google'} Login is not configured on this server. Please use Email/Password (Try "root").`);
+          } else {
+             setError(err.message || "OAuth login failed.");
+          }
+          setIsOAuthLoading(null);
+      }
   };
 
   const openLegal = (type: PolicyType) => {
@@ -113,7 +190,18 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
         {/* Login Form */}
         <div className="px-8 pb-10">
-          <form onSubmit={handleLogin} className="space-y-5">
+          {tenants.length === 0 && !isTenantsLoading && (
+              <div className="mb-6 p-4 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-800 flex items-start gap-3">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                  <div>
+                      <p className="font-bold">First Time Setup?</p>
+                      <p className="mt-1">No organizations exist in the database yet. Please login as Superuser to create your first tenant.</p>
+                      <p className="mt-2 font-mono bg-white/50 p-1 rounded border border-amber-200 w-fit">super@invoiceflow.com</p>
+                  </div>
+              </div>
+          )}
+
+          <form onSubmit={handlePasswordLogin} className="space-y-5">
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Work Email</label>
               <div className="relative group">
@@ -124,7 +212,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@company.com"
-                  className="w-full pl-10 pr-4 py-2.5 bg-white text-slate-800 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-300 font-medium"
+                  className="w-full pl-10 pr-4 py-2.5 bg-white text-slate-800 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-300 font-medium disabled:opacity-50"
+                  disabled={!!isOAuthLoading}
                 />
               </div>
             </div>
@@ -139,36 +228,73 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-10 pr-4 py-2.5 bg-white text-slate-800 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-300 font-medium"
+                  className="w-full pl-10 pr-4 py-2.5 bg-white text-slate-800 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-300 font-medium disabled:opacity-50"
+                  disabled={!!isOAuthLoading}
                 />
               </div>
             </div>
 
             {error && (
-              <div className="p-3 bg-rose-50/50 border border-rose-100 rounded-lg text-xs font-medium text-rose-600 flex items-center gap-2">
-                <div className="w-1 h-1 rounded-full bg-rose-500 shrink-0"></div>
-                {error}
+              <div className="p-3 bg-rose-50/50 border border-rose-100 rounded-lg text-xs font-medium text-rose-600 flex items-start gap-2 animate-in fade-in slide-in-from-top-1">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{error}</span>
               </div>
             )}
 
             <button 
               type="submit" 
-              disabled={isLoading}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 shadow-lg shadow-slate-200 active:scale-[0.98]"
+              disabled={isLoading || isTenantsLoading || !!isOAuthLoading}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 shadow-lg shadow-slate-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
             >
               {isLoading ? <Loader2 className="animate-spin" size={20} /> : <>Sign In <ArrowRight size={18} /></>}
             </button>
           </form>
 
+          {/* SSO Options */}
+          <div className="mt-6">
+              <div className="relative flex py-2 items-center">
+                  <div className="flex-grow border-t border-slate-200"></div>
+                  <span className="flex-shrink-0 mx-4 text-slate-400 text-xs font-semibold uppercase">Or continue with</span>
+                  <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mt-2">
+                  <button 
+                      onClick={() => handleOAuthLogin('azure')}
+                      disabled={!!isOAuthLoading || !isConnected}
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors bg-white disabled:opacity-50"
+                  >
+                      {isOAuthLoading === 'microsoft' ? <Loader2 size={18} className="animate-spin text-slate-600" /> : (
+                          <div className="flex items-center gap-2">
+                              <svg className="w-4 h-4" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0 0H10.8931V10.8931H0V0Z" fill="#F25022"/><path d="M12.1069 0H23V10.8931H12.1069V0Z" fill="#7FBA00"/><path d="M0 12.1069H10.8931V23H0V12.1069Z" fill="#00A4EF"/><path d="M12.1069 12.1069H23V23H12.1069V12.1069Z" fill="#FFB900"/></svg>
+                              <span className="text-sm font-semibold text-slate-700">Microsoft</span>
+                          </div>
+                      )}
+                  </button>
+                  <button 
+                      onClick={() => handleOAuthLogin('google')}
+                      disabled={!!isOAuthLoading || !isConnected}
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors bg-white disabled:opacity-50"
+                  >
+                      {isOAuthLoading === 'google' ? <Loader2 size={18} className="animate-spin text-slate-600" /> : (
+                          <div className="flex items-center gap-2">
+                              <svg className="w-4 h-4" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                              <span className="text-sm font-semibold text-slate-700">Google</span>
+                          </div>
+                      )}
+                  </button>
+              </div>
+          </div>
+
           {/* Connection Status Indicator */}
           <div className="mt-8 flex justify-center">
-             {isOfflineMode ? (
-                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-[10px] font-medium border border-slate-200">
-                     <WifiOff size={10} /> Local Demo Mode
+             {!isConnected ? (
+                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-[10px] font-medium border border-slate-200" title={connectionMsg}>
+                     <WifiOff size={10} /> {connectionMsg}
                  </div>
              ) : (
                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-medium border border-emerald-100/50">
-                     <Wifi size={10} /> Secure Connection
+                     <Wifi size={10} /> {connectionMsg}
                  </div>
              )}
           </div>
