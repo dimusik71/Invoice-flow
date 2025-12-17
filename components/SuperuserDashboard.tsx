@@ -16,8 +16,8 @@ const FEATURE_LABELS: Record<keyof TenantFeatures, string> = {
     emailIngestion: "Email Ingestion"
 };
 
-// LIVE CLIENT ID PROVIDED BY USER
-const LIVE_GOOGLE_CLIENT_ID = '745318511026-vtoneil8bl1ms3s60d25qoucnjnj63i5.apps.googleusercontent.com';
+// Google OAuth Client ID from environment variable
+const LIVE_GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 // Initial Mock Users
 const INITIAL_USERS: Record<string, any[]> = {
