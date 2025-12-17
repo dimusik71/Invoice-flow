@@ -10,8 +10,7 @@ import { useTenant } from '../contexts/TenantContext';
 import { generateBrandingProfile } from '../services/geminiService';
 import { sendRealEmail } from '../services/emailService';
 
-// LIVE CLIENT ID PROVIDED BY USER
-const LIVE_GOOGLE_CLIENT_ID = '745318511026-vtoneil8bl1ms3s60d25qoucnjnj63i5.apps.googleusercontent.com';
+const LIVE_GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 interface SettingsProps {
   settings: AppSettings;
