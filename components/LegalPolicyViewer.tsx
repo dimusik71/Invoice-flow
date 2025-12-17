@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { X, Shield, Lock, FileText, Globe } from 'lucide-react';
+import DOMPurify from 'dompurify';
 
 export type PolicyType = 'privacy' | 'tos' | 'security';
 
@@ -114,7 +115,7 @@ const LegalPolicyViewer: React.FC<LegalPolicyViewerProps> = ({ isOpen, onClose, 
 
         {/* Content */}
         <div className="p-8 overflow-y-auto text-sm text-slate-600 leading-relaxed space-y-4 font-sans">
-           <div dangerouslySetInnerHTML={{ __html: policy.content }} />
+           <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(policy.content) }} />
         </div>
 
         {/* Footer */}
