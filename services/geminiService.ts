@@ -3,8 +3,8 @@ import { GoogleGenAI } from "@google/genai";
 import { Invoice, ValidationResult, ValidationSeverity, PolicyDocument, RiskAssessment, RiskLevel, PurchaseOrder, SpendingAnalysis, Client, ChiefAuditorReview, WeeklySystemAuditReport, RejectionDrafts, ComplianceTemplate, ComplianceField, ComplianceAuditResult } from '../types';
 import { MOCK_POS } from '../constants';
 
-// Default fallback key
-const DEFAULT_API_KEY = process.env.API_KEY || 'dummy-key'; 
+// Default fallback key - uses Vite environment variable
+const DEFAULT_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''; 
 
 // --- MODEL ROUTING CONFIGURATION ---
 // "AI agents will use an LLM that is appropriate to the task to be more efficient and cost efficient."

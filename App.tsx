@@ -70,7 +70,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     complianceTemplates: [],
     extractionPrompt: '',
     llmKeys: {
-        gemini: process.env.API_KEY || '', // Inject Live Key from Environment
+        gemini: import.meta.env.VITE_GEMINI_API_KEY || '', // Inject Live Key from Environment
         openai: '',
         anthropic: '',
         grok: '',
@@ -163,7 +163,7 @@ const AppContent = () => {
               llmKeys: { 
                   ...DEFAULT_SETTINGS.llmKeys, 
                   ...(parsed.llmKeys || {}),
-                  gemini: parsed.llmKeys?.gemini || process.env.API_KEY || ''
+                  gemini: parsed.llmKeys?.gemini || import.meta.env.VITE_GEMINI_API_KEY || ''
               },
               notificationRules: parsed.notificationRules || [],
               emailServiceConfig: parsed.emailServiceConfig || { provider: 'emailjs', serviceId: '', templateId: '', publicKey: '' }
