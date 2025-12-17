@@ -2,34 +2,62 @@
 import { GoogleGenAI } from "@google/genai";
 import { Invoice, ValidationResult, ValidationSeverity, PolicyDocument, RiskAssessment, RiskLevel, PurchaseOrder, SpendingAnalysis, Client, ChiefAuditorReview, WeeklySystemAuditReport, RejectionDrafts, ComplianceTemplate, ComplianceField, ComplianceAuditResult } from '../types';
 import { MOCK_POS } from '../constants';
+import { 
+    getGeminiClient, 
+    callOpenAICompatibleAPI, 
+    callPerplexityResearch,
+    selectBestProvider,
+    multiLLMChat,
+    getAvailableProviders,
+    type LLMProvider,
+    type TaskComplexity as LLMTaskComplexity,
+    API_KEYS,
+    PROVIDER_MODELS
+} from './llmService';
 
 // Default fallback key - uses Vite environment variable
 const DEFAULT_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''; 
 
-// --- MODEL ROUTING CONFIGURATION ---
+// --- MULTI-LLM MODEL ROUTING CONFIGURATION ---
+// Now supports: Gemini, OpenAI (GPT-5.2), xAI (Grok 4.1), Perplexity
 // "AI agents will use an LLM that is appropriate to the task to be more efficient and cost efficient."
+
 const MODEL_ROUTER = {
     // TIER 1: HIGH VELOCITY / LOW COST
     // Use for: Simple chat, basic text generation, UI strings.
-    // Cost: ~$0.075 / 1M tokens
-    FAST: 'gemini-2.5-flash-lite-preview-02-05', 
-
-    // TIER 2: BALANCED / STANDARD TOOLS
-    // Use for: OCR, Web Search Grounding, Branding, General Summarization.
-    // Cost: ~$0.10 / 1M tokens
-    STANDARD: 'gemini-2.5-flash',
-
-    // TIER 3: HIGH INTELLIGENCE / REASONING
-    // Use for: Deep Audits, Fraud Detection, Complex Math, Financial Analysis.
-    // Cost: ~$1.25 / 1M tokens (Significantly higher, use sparingly)
-    COMPLEX: 'gemini-3-pro-preview'
+    gemini: {
+        FAST: 'gemini-2.5-flash-lite-preview-02-05',
+        STANDARD: 'gemini-2.5-flash',
+        COMPLEX: 'gemini-3-pro-preview',
+    },
+    // OpenAI GPT Models
+    openai: {
+        FAST: 'gpt-4.1-nano',
+        STANDARD: 'gpt-4.1-mini', 
+        COMPLEX: 'gpt-5.2',
+    },
+    // xAI Grok Models
+    xai: {
+        FAST: 'grok-3-mini',
+        STANDARD: 'grok-3',
+        COMPLEX: 'grok-4.1',
+    },
+    // Perplexity Models (best for research/web search)
+    perplexity: {
+        FAST: 'sonar',
+        STANDARD: 'sonar-pro',
+        COMPLEX: 'sonar-reasoning-pro',
+        RESEARCH: 'sonar-deep-research',
+    },
 };
 
 type TaskComplexity = 'FAST' | 'STANDARD' | 'COMPLEX';
 
-const getOptimalModel = (complexity: TaskComplexity) => {
-    return MODEL_ROUTER[complexity];
+const getOptimalModel = (complexity: TaskComplexity, provider: LLMProvider = 'gemini') => {
+    return MODEL_ROUTER[provider]?.[complexity] || MODEL_ROUTER.gemini[complexity];
 };
+
+export { getAvailableProviders, callPerplexityResearch, multiLLMChat, selectBestProvider };
 
 // Simulated Internal Database of Approved Contractors
 const MOCK_APPROVED_CONTRACTORS_DB = `

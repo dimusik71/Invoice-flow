@@ -70,11 +70,11 @@ const DEFAULT_SETTINGS: AppSettings = {
     complianceTemplates: [],
     extractionPrompt: '',
     llmKeys: {
-        gemini: import.meta.env.VITE_GEMINI_API_KEY || '', // Inject Live Key from Environment
-        openai: '',
+        gemini: import.meta.env.VITE_GEMINI_API_KEY || '',
+        openai: import.meta.env.VITE_OPENAI_API_KEY || '',
         anthropic: '',
-        grok: '',
-        perplexity: '',
+        grok: import.meta.env.VITE_XAI_API_KEY || '',
+        perplexity: import.meta.env.VITE_PERPLEXITY_API_KEY || '',
     },
     auditPrompt: {
       priceReasonableness: "Analyze price reasonableness for EACH line item. Compare unit prices against standard market rates for support services (e.g. Cleaning ~$50/hr, Personal Care ~$65/hr, Gardening ~$60/hr). Flag any significant deviations.",
@@ -163,7 +163,10 @@ const AppContent = () => {
               llmKeys: { 
                   ...DEFAULT_SETTINGS.llmKeys, 
                   ...(parsed.llmKeys || {}),
-                  gemini: parsed.llmKeys?.gemini || import.meta.env.VITE_GEMINI_API_KEY || ''
+                  gemini: parsed.llmKeys?.gemini || import.meta.env.VITE_GEMINI_API_KEY || '',
+                  openai: parsed.llmKeys?.openai || import.meta.env.VITE_OPENAI_API_KEY || '',
+                  grok: parsed.llmKeys?.grok || import.meta.env.VITE_XAI_API_KEY || '',
+                  perplexity: parsed.llmKeys?.perplexity || import.meta.env.VITE_PERPLEXITY_API_KEY || '',
               },
               notificationRules: parsed.notificationRules || [],
               emailServiceConfig: parsed.emailServiceConfig || { provider: 'emailjs', serviceId: '', templateId: '', publicKey: '' }
