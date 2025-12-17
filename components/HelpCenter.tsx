@@ -88,7 +88,7 @@ const KNOWLEDGE_BASE: Record<string, { id: string; title: string; description: s
         <div className="space-y-4">
           <p>You can adjust the "Personality" and "Strictness" of the AI in <strong>Settings &gt; AI Prompt Tuning</strong>.</p>
           <ul className="list-disc pl-5 space-y-2 text-slate-700">
-            <li><strong>Price Reasonableness:</strong> Define your specific hourly caps (e.g., "Flag cleaning > $60/hr").</li>
+            <li><strong>Price Reasonableness:</strong> Define your specific hourly caps (e.g., "Flag cleaning &gt; $60/hr").</li>
             <li><strong>Fraud Indicators:</strong> Add specific keywords to watch for (e.g., "Consulting", "Miscellaneous").</li>
             <li><strong>Policy Documents:</strong> Upload your internal PDF policies. The AI reads these and will cite specific page numbers if an invoice violates a clause.</li>
           </ul>
