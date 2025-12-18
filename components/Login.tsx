@@ -7,16 +7,25 @@ import { Lock, Mail, ArrowRight, Loader2, ShieldCheck, Wifi, WifiOff, CheckCircl
 import { UserRole } from '../types';
 import LegalPolicyViewer, { PolicyType } from './LegalPolicyViewer';
 
-interface LoginProps {
-  onLoginSuccess: (role: UserRole) => void;
+interface PendingInvitation {
+  tenantId: string;
+  email: string;
+  role: string;
 }
 
-const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
+interface LoginProps {
+  onLoginSuccess: (role: UserRole) => void;
+  pendingInvitation?: PendingInvitation | null;
+  onClearInvitation?: () => void;
+}
+
+const Login: React.FC<LoginProps> = ({ onLoginSuccess, pendingInvitation, onClearInvitation }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOAuthLoading, setIsOAuthLoading] = useState<string | null>(null); // 'google' | 'microsoft' | null
   const [error, setError] = useState<string | null>(null);
+  const [invitationMessage, setInvitationMessage] = useState<string | null>(null);
   
   // Connection Status
   const [isConnected, setIsConnected] = useState<boolean | null>(null);
@@ -27,6 +36,13 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [legalModalType, setLegalModalType] = useState<PolicyType>('privacy');
 
   useEffect(() => {
+    if (pendingInvitation) {
+      setEmail(pendingInvitation.email);
+      setInvitationMessage(`Welcome! You've been invited as ${pendingInvitation.role}. Please log in with the credentials sent to your email.`);
+    }
+  }, [pendingInvitation]);
+
+  useEffect(() => {
       // Check Real Connection on Mount
       const checkParams = async () => {
           const result = await checkDatabaseConnection();
@@ -35,12 +51,27 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       };
       checkParams();
 
-      // Check for existing session (Handling OAuth Redirect)
+      // Check for existing session (Handling OAuth Redirect or Magic Link)
       if (supabase) {
           supabase.auth.getSession().then(({ data: { session } }) => {
               if (session?.user?.email) {
-                  // User is already logged in (e.g. returned from SSO)
+                  // User is already logged in (e.g. returned from SSO or magic link)
                   console.log("Session found:", session.user.email);
+                  
+                  // Check for trusted invitation metadata from Supabase (set during signInWithOtp)
+                  const userMeta = session.user.user_metadata;
+                  if (userMeta?.tenant_id && userMeta?.role) {
+                      // Use trusted metadata from Supabase session
+                      const invitedTenant = tenants.find(t => t.id === userMeta.tenant_id);
+                      if (invitedTenant) {
+                          setTenant(invitedTenant);
+                          const role = userMeta.role.toLowerCase() === 'administrator' ? 'admin' : 'officer';
+                          onLoginSuccess(role as UserRole);
+                          onClearInvitation?.();
+                          return;
+                      }
+                  }
+                  
                   resolveUserContext(session.user.email, true);
               }
           });
@@ -62,9 +93,14 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           if ((lowerEmail === 'super@invoiceflow.com') || 
               (lowerEmail === 'dmitry@smplsinnovation.com.au')) {
               onLoginSuccess('superuser');
+              onClearInvitation?.();
               setIsLoading(false);
               return;
           }
+
+          // NOTE: Tenant assignment for invited users now happens via trusted Supabase 
+          // session metadata (user_metadata.tenant_id) in the session check above.
+          // The URL token is only used for UX hints, not authorization.
 
           // 1. Tenant Resolution
           if (tenants.length === 0) {
@@ -100,6 +136,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                   onLoginSuccess('admin');
               }
           }
+          
+          onClearInvitation?.();
 
       } catch (err: any) {
           setError(err.message || 'Login failed.');
@@ -190,6 +228,16 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
         {/* Login Form */}
         <div className="px-8 pb-10">
+          {invitationMessage && (
+              <div className="mb-6 p-4 bg-emerald-50 border border-emerald-100 rounded-xl text-xs text-emerald-800 flex items-start gap-3">
+                  <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
+                  <div>
+                      <p className="font-bold">Invitation Received</p>
+                      <p className="mt-1">{invitationMessage}</p>
+                  </div>
+              </div>
+          )}
+
           {tenants.length === 0 && !isTenantsLoading && (
               <div className="mb-6 p-4 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-800 flex items-start gap-3">
                   <AlertCircle size={16} className="shrink-0 mt-0.5" />

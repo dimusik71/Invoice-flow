@@ -5,6 +5,7 @@ import { TenantConfig, TenantFeatures, TenantStatus, WeeklySystemAuditReport, Do
 import { Building2, Plus, Users, Settings, Activity, Shield, ToggleLeft, ToggleRight, Copy, Check, X, Palette, Lock, LogIn, Archive, PauseCircle, PlayCircle, Trash2, AlertTriangle, MoreVertical, Terminal, Database, Server, RefreshCw, TestTube, Zap, Bell, Globe, Clock, FileText, Image as ImageIcon, LayoutTemplate, Sparkles, Loader2, Scale, ScrollText, Mail, Send, Save, Eye, EyeOff, LogOut, Rocket, CheckCircle, XCircle, Search, Filter, ShieldCheck } from 'lucide-react';
 import { generateBrandingProfile, performWeeklySystemAudit } from '../services/geminiService';
 import { sendRealEmail } from '../services/emailService';
+import { sendMagicLinkInvite, generateInvitationEmailContent } from '../services/invitationService';
 import { MOCK_INVOICES, INITIAL_TENANTS } from '../constants';
 import { checkDatabaseConnection } from '../services/dbService';
 
@@ -358,15 +359,39 @@ const SuperuserDashboard: React.FC<SuperuserDashboardProps> = ({ onImpersonate, 
             setUsersByTenant(prev => ({ ...prev, [newId]: [newUser] }));
 
             if (sendInviteNow) {
-                const token = btoa(`${newId}-${initialAdminEmail}-${Date.now()}`);
-                // Use query parameter to handle routing on client-side SPA without 404
-                const link = `${window.location.origin}?action=join&token=${token}`;
-                
-                const subject = `Welcome to ${newOrgName} - Setup your InvoiceFlow Account`;
-                const body = `You have been invited to join ${newOrgName} as an Administrator.\n\nPlease follow this link to set up your account password:\n\n${link}\n\nIf you did not expect this invitation, please ignore this email.`;
+                const inviteResult = await sendMagicLinkInvite({
+                    email: initialAdminEmail,
+                    tenantId: newId,
+                    role: 'Administrator',
+                    tenantName: newOrgName
+                });
 
-                // Open device email client
-                window.location.href = `mailto:${initialAdminEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                if (inviteResult.success) {
+                    const loginUrl = `${window.location.origin}`;
+                    const { subject, body } = generateInvitationEmailContent(
+                        newOrgName,
+                        initialAdminEmail,
+                        loginUrl
+                    );
+
+                    if (emailServiceConfig && emailServiceConfig.provider) {
+                        const emailSent = await sendRealEmail(emailServiceConfig, initialAdminEmail, subject, body);
+                        if (!emailSent) {
+                            window.location.href = `mailto:${initialAdminEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                        }
+                    } else {
+                        window.location.href = `mailto:${initialAdminEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                    }
+                    
+                    setUsersByTenant(prev => ({
+                        ...prev,
+                        [newId]: (prev[newId] || []).map(u => 
+                            u.email === initialAdminEmail ? { ...u, status: 'Invited' } : u
+                        )
+                    }));
+                } else {
+                    alert(`Invitation could not be sent: ${inviteResult.error || 'Unknown error'}. The organization was created but the admin will need to be invited manually.`);
+                }
             }
         }
         setIsCreateModalOpen(false);

@@ -20,6 +20,7 @@ import { performDeepAudit } from './services/geminiService';
 import { validateInvoiceAgainstSystem } from './services/validationService';
 import { assembleAuditPrompt } from './services/promptService';
 import { sendRealEmail } from './services/emailService';
+import { parseInvitationToken } from './services/invitationService';
 import { Loader2 } from 'lucide-react';
 import { INITIAL_TENANTS } from './constants';
 
@@ -106,10 +107,42 @@ const AppContent = () => {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [showDevTools, setShowDevTools] = useState(false);
+  const [invitationPending, setInvitationPending] = useState<{tenantId: string; email: string; role: string} | null>(null);
 
   // Contexts
   const { tenant, setTenant, tenants } = useTenant();
   const { addNotification } = useNotifications();
+
+  // --- INVITATION HANDLER ---
+  // NOTE: This URL token is ONLY used for UX purposes (showing welcome message, pre-filling email).
+  // Actual tenant/role authorization happens via trusted Supabase session metadata (user_metadata)
+  // which is set securely during the signInWithOtp call and cannot be tampered with.
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const action = urlParams.get('action');
+    const token = urlParams.get('token');
+    
+    if (action === 'join' && token) {
+      const parsed = parseInvitationToken(token);
+      if (parsed) {
+        const tokenAge = Date.now() - parsed.timestamp;
+        const maxAge = 24 * 60 * 60 * 1000;
+        
+        if (tokenAge < maxAge) {
+          // This is only for UX hints - actual auth comes from Supabase session
+          setInvitationPending({
+            tenantId: parsed.tenantId,
+            email: parsed.email,
+            role: parsed.role
+          });
+          window.history.replaceState({}, '', window.location.pathname);
+        } else {
+          console.warn('Invitation token expired');
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+      }
+    }
+  }, []);
 
   // --- OAUTH CALLBACK HANDLER ---
   useEffect(() => {
@@ -450,7 +483,11 @@ const AppContent = () => {
             </div>
         </div>;
     }
-    return <Login onLoginSuccess={handleLoginSuccess} />;
+    return <Login 
+      onLoginSuccess={handleLoginSuccess} 
+      pendingInvitation={invitationPending}
+      onClearInvitation={() => setInvitationPending(null)}
+    />;
   }
 
   return (
